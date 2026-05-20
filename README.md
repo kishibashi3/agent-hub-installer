@@ -110,11 +110,11 @@ curl -fsSL https://get.agent-hub.dev | bash -s -- --dry-run --user mybot
 ## URL hosting
 
 主要 endpoint:
-- `https://get.agent-hub.dev` — Cloudflare worker redirect (= production)
-- `https://kishibashi3.github.io/agent-hub-installer/install.sh` — GitHub Pages fallback
-- `https://raw.githubusercontent.com/kishibashi3/agent-hub-installer/main/install.sh` — Direct
+- `https://kishibashi3.github.io/agent-hub-installer/install.sh` — **GitHub Pages (= live、 anonymous fetch 可能、 operator が 2026-05-20 enable 済)**
+- `https://raw.githubusercontent.com/kishibashi3/agent-hub-installer/main/install.sh` — Direct raw (= 常に最新 main、 redirect なし)
+- `https://get.agent-hub.dev` — Cloudflare worker / DNS short URL (= future polish、 setup pending)
 
-(= GitHub Pages enable は initial setup で operator が一度実施、 詳細は [issue #101 Follow-up 候補](https://github.com/kishibashi3/agent-hub/issues/101#issue) 参照)
+GitHub Pages は operator の personal domain (= 例 `kishibashi3.github.io` CNAME 設定) で配信される可能性があります。 短く覚えやすい URL を優先する場合は Pages、 redirect なしの canonical fetch を保証したい場合は raw URL を使ってください。
 
 ## Related
 
