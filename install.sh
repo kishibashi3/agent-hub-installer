@@ -222,7 +222,16 @@ check_prereqs() {
   check_os
   check_command python3 "Install Python 3.10+ from https://www.python.org/"
   check_python_version
-  check_command docker "Install Docker from https://docs.docker.com/get-docker/"
+
+  # Docker は **`--hub-mode self-host` の時のみ必須** (= PR #2 review Suggestion 1 反映、
+  # Minor 3 の natural 延長)。 public mode (= agent-hub-ki.fly.dev に接続) では
+  # local hub server を起動しないため Docker 不要、 check も skip。 これにより
+  # Tier 1 「最も簡単な体験」 path で Docker 未 install の layperson も blocker なく実行可。
+  if [[ "${HUB_MODE}" == "self-host" ]]; then
+    check_command docker "Install Docker from https://docs.docker.com/get-docker/ (= --hub-mode self-host で必須)"
+  else
+    info "Docker check skipped (--hub-mode public → no local hub server)"
+  fi
 
   if [[ "${TIER}" == "2" ]]; then
     check_command gh "Install gh CLI from https://cli.github.com/ (Tier 2 で private fork access に必要)"
