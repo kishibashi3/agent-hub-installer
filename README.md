@@ -9,39 +9,31 @@ agent-hub ecosystem の **2-stage bootstrap installer** (= [issue #101](https://
 ### Tier 1 (Try it) — 最も簡単な体験
 
 ```bash
-curl -fsSL https://get.agent-hub.dev | bash
+curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash
 ```
 
 これだけで:
 - OS + Python 3.10+ + Docker の pre-requisite check
 - `agent-hub-bridges[claude]` + `agent-hub-roles[all]` を pip install
-- `ghcr.io/kishibashi3/agent-hub:latest` Docker image を pull
 - `~/.agent-hub/config.yaml` を生成
 - bridge worker を background で起動
 
 完了後、 Claude Code を開いて `@<your-handle> hello` を送ると、 agent-hub 上の bot peer と会話できます。
 
+step-by-step ガイドは [SETUP.md](./SETUP.md) を参照してください。
+
 ### Tier 2 (Own it) — private fork で knowledge 累積
 
 ```bash
-# 既に private fork (= 例 myuser/agent-hub-roles) を作成済の場合
-curl -fsSL https://get.agent-hub.dev | bash -s -- \
+# 1. template から private fork を作成
+gh repo create --template kishibashi3/agent-hub-roles --private myuser/agent-hub-roles
+
+# 2. installer を Tier 2 mode で実行
+curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -s -- \
   --tier 2 --roles-repo myuser/agent-hub-roles --user mybot
 ```
 
-fork は `kishibashi3/agent-hub-roles` を template として作成してください:
-
-```bash
-gh repo create --template kishibashi3/agent-hub-roles --private myuser/agent-hub-roles
-```
-
-### Tier 1 → Tier 2 migration (= 既存 Tier 1 user)
-
-```bash
-agent-hub upgrade-to-tier2 --template kishibashi3/agent-hub-roles --private
-```
-
-(= `agent-hub` CLI に含まれる migration command、 別 issue で実装予定)
+> ⚠️ **Tier 1 → Tier 2 への自動 migration tool は提供しません**。 Tier 1 は試用 throwaway 前提、 Tier 2 は fresh start が自然、 という design 判断 (= over-engineering 回避)。 Tier 1 で customization を蓄積した場合は手動で fork repo にコピーしてください。
 
 ## なぜ 2-tier なのか
 
@@ -52,7 +44,7 @@ agent-hub upgrade-to-tier2 --template kishibashi3/agent-hub-roles --private
 
 - **Tier 1 fork-less** = 「まず動かす」 体験の friction 最小化 (= Homebrew / nix / mise 等の業界 norm に整合)
 - **Tier 2 fork-required** = reviewer 判断基準 / planner 履歴 / feedback-archive 等の **知的資産を git で versioning** し、 team 共有 + upstream PR を可能にする
-- **Tier 1 → Tier 2 migration** = `agent-hub upgrade-to-tier2` CLI で **自動化** (= 業界 norm の manual git ops 越え)
+- **Tier 1 → Tier 2** = **fresh start** で移行 (= Tier 1 throwaway 設計、 自動 migration tool なし)
 
 詳細は [agent-hub issue #101](https://github.com/kishibashi3/agent-hub/issues/101) 参照。
 
@@ -104,7 +96,7 @@ Docker image (via `docker pull`):
 `--dry-run` で実行内容を確認できます (副作用なし):
 
 ```bash
-curl -fsSL https://get.agent-hub.dev | bash -s -- --dry-run --user mybot
+curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -s -- --dry-run --user mybot
 ```
 
 ## URL hosting
