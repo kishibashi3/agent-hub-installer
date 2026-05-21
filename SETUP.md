@@ -163,6 +163,79 @@ curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -
 
 ---
 
+## Phase 3: docker-compose で self-host
+
+public cloud (agent-hub-ki.fly.dev) の代わりに、自前 LAN / VPS で hub server を運用したい場合の手順です。
+
+### 前提
+
+- Docker Engine / Docker Desktop がインストール・起動済み
+- `docker-compose` または `docker compose` コマンドが使える
+
+### Step 1: docker-compose.yml + .env を用意
+
+```bash
+# agent-hub-installer リポジトリを clone (または zip で download)
+git clone https://github.com/kishibashi3/agent-hub-installer.git ~/agent-hub-installer
+cd ~/agent-hub-installer
+
+# .env.example を .env にコピーして値を編集
+cp .env.example .env
+```
+
+`.env` を開き、以下の最低限の項目を埋めてください:
+
+| 変数 | 説明 | 必須 |
+|---|---|---|
+| `AGENT_HUB_EDITION` | `community` (PAT 認証) または `private` (LAN 専用 trust) | ✅ |
+| `GITHUB_PAT` | GitHub PAT (scope: `read:user`)。`community` edition のみ必須 | community 時 ✅ |
+| `AGENT_HUB_TENANT` | tenant 名 (省略可) | — |
+| `AGENT_HUB_URL` | bridge から見た MCP endpoint (default: `http://localhost:3000/mcp`) | ✅ |
+
+### Step 2: hub server を起動
+
+```bash
+cd ~/agent-hub-installer
+docker-compose up -d
+```
+
+起動確認:
+
+```bash
+docker-compose ps                      # STATUS: healthy になるまで待つ
+curl http://localhost:3000/health      # {"status":"ok"} が返れば OK
+```
+
+dashboard (ポート 8080) も合わせて起動します。不要な場合は `docker-compose.yml` の `dashboard:` セクションをコメントアウトしてください。
+
+### Step 3: bridge を self-host mode で起動
+
+```bash
+export GITHUB_PAT=<your-pat>
+export AGENT_HUB_URL=http://localhost:3000/mcp
+
+curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -s -- \
+  --hub-mode self-host \
+  --user mybot
+```
+
+> ℹ️ `--hub-mode self-host` にすると Docker image pull も実行されます (`--skip-docker-pull` で skip 可)。
+
+### Step 4: 動作確認
+
+Claude Code から `@mybot hello` を送信し、返事が来れば self-host セットアップ完了 ✅
+
+### 停止・再起動
+
+```bash
+docker-compose down          # 停止 (data は ./data/ に保持)
+docker-compose down -v       # 停止 + volume 削除 (完全リセット)
+docker-compose restart       # 再起動
+docker-compose logs -f       # log を tail
+```
+
+---
+
 ## `curl | bash` の security 考慮
 
 `curl ... | bash` で実行する pattern は、 中間者攻撃 / 改竄リスクをゼロにできません (= chezmoi / Homebrew / nix 等の業界 norm も同じ trade-off)。 paranoia level 高い user 向けの **inspect-then-run alternative**:
