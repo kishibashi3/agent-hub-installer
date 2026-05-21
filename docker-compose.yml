@@ -1,0 +1,64 @@
+# agent-hub self-host — docker-compose.yml
+#
+# agent-hub server + dashboard を self-host で起動するための compose ファイル。
+# public cloud (agent-hub-ki.fly.dev) の代わりに自前 LAN / VPS で hub を運用したい場合に使用。
+#
+# usage:
+#   1. cp .env.example .env  && 各変数を自分の値で書き換える
+#   2. docker-compose up -d
+#   3. docker-compose logs -f   # log を tail
+#   4. install.sh を --hub-mode self-host で実行してブリッジを起動
+#   5. docker-compose down      # 停止
+#
+# Refs:
+#   - kishibashi3/agent-hub-installer issue #6
+#   - SETUP.md Phase 3 (Self-host) セクション
+
+version: "3.8"
+
+services:
+  agent-hub:
+    image: ghcr.io/kishibashi3/agent-hub:latest
+    container_name: agent-hub
+    restart: unless-stopped
+    ports:
+      # MCP HTTP endpoint (= /mcp, /health)
+      - "3000:3000"
+    volumes:
+      # SQLite DB + schedules.json を host 側に永続化
+      - ./data:/app/data
+    environment:
+      # Edition: community (PAT 認証 + multi-tenant) / private (trust, LAN 専用)
+      # 未設定時は server の fail-fast が検出する (.env.example の AGENT_HUB_EDITION を必ず設定すること)
+      AGENT_HUB_EDITION: ${AGENT_HUB_EDITION:-}
+      # GitHub PAT (scope: read:user) — community edition 必須
+      GITHUB_PAT: ${GITHUB_PAT:-}
+      # tenant (省略可、デフォルト tenant を使う場合は不要)
+      AGENT_HUB_TENANT: ${AGENT_HUB_TENANT:-}
+      # DB path (コンテナ内パス、volume mount と合わせること)
+      DB_PATH: ${DB_PATH:-/app/data/app.db}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  # dashboard sidecar — メッセージ traffic を可視化 (optional)
+  # 不要な場合はこのサービスをコメントアウトして構いません
+  dashboard:
+    image: ghcr.io/kishibashi3/agent-hub-dashboard:latest
+    container_name: agent-hub-dashboard
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # agent-hub と同じ data dir を read-only で共有
+      - ./data:/app/data:ro
+    environment:
+      DB_PATH: /app/data/app.db
+      PORT: "8080"
+      AGENT_HUB_TENANT: ${AGENT_HUB_TENANT:-}
+    depends_on:
+      agent-hub:
+        condition: service_healthy

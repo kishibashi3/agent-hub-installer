@@ -1,0 +1,5 @@
+# 秘密情報 (= .env.example のみ commit、.env は commit しない)
+.env
+
+# docker-compose が生成する data volume
+data/
