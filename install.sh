@@ -296,11 +296,12 @@ pull_docker_image() {
 }
 
 install_python_packages() {
-  info "Installing Python packages (agent-hub-bridges + agent-hub-roles)..."
+  info "Installing Python packages (agent-hub-bridges)..."
   # --user で user-site にインストール (= system Python を汚さない)
   # Minor 1 反映: array 渡し (= eval 廃止) で extras `[claude]` / `[all]` も
   # 各 token として正しく解釈される。
-  run_or_dry python3 -m pip install --user 'agent-hub-bridges[claude]' 'agent-hub-roles[all]'
+  # Note: agent-hub-roles は doc-only repo であり pip パッケージではない (= インストール不要)
+  run_or_dry python3 -m pip install --user 'agent-hub-bridges[claude]'
 
   # PATH hint (= user-site bin が PATH に通っていない場合の友好メッセージ)
   local user_bin
@@ -397,29 +398,31 @@ EOF_CFG
 start_bridge() {
   info "Starting bridge worker in background (logs: ${AGENT_HUB_DIR}/logs/bridge.log)..."
   if [[ "${DRY_RUN}" == "yes" ]]; then
-    c_dim "[dry-run] would spawn: agent-hub-bridges-claude --config ${AGENT_HUB_DIR}/config.yaml"
+    c_dim "[dry-run] would spawn: AGENT_HUB_URL=<url> agent-hub-bridge-claude --user ${USER_HANDLE}"
     return
   fi
 
   # Minor 2 反映: 既に bridge が動いていれば respawn しない (= idempotency 100% 担保)。
-  # pgrep で `agent-hub-bridges-claude --config <this config path>` を grep、
-  # 同 config の bridge が見つかれば skip + hint。 別 config で別 bridge を動かしている
-  # case (= 同一 host で複数 handle 運用) は false positive 回避のため `-f` で full
-  # command line match + config path で限定。
-  if pgrep -f "agent-hub-bridges-claude.*${AGENT_HUB_DIR}/config.yaml" >/dev/null 2>&1; then
+  # pgrep で `agent-hub-bridge-claude --user <handle>` を grep、
+  # 同 handle の bridge が見つかれば skip + hint。
+  if pgrep -f "agent-hub-bridge-claude.*--user.*${USER_HANDLE}" >/dev/null 2>&1; then
     local existing_pid
-    existing_pid=$(pgrep -f "agent-hub-bridges-claude.*${AGENT_HUB_DIR}/config.yaml" | head -1)
+    existing_pid=$(pgrep -f "agent-hub-bridge-claude.*--user.*${USER_HANDLE}" | head -1)
     warn "Bridge worker already running (PID: ${existing_pid}). Skipping spawn."
     warn "  → to respawn: kill ${existing_pid} && rerun installer"
     return
   fi
 
+  # bridge CLI は --user <handle> + env vars 方式 (--config フラグは未実装)。
+  # 必須 env vars を export してから起動する。
+  # GITHUB_PAT は caller の env から継承 (未設定なら bridge 起動後にエラー)。
+  export AGENT_HUB_URL="${AGENT_HUB_HUB_URL_DEFAULT}"
+  export AGENT_HUB_TENANT="${USER:-${USER_HANDLE}}"
+
   # nohup + & で daemonize + disown で shell 親子関係を切断 (= Suggestion (a) 反映、
-  # agent-hub-roles start.sh と pattern を揃え、 SIGHUP propagation を防ぐ)。
-  # stdout/stderr を log file に redirect。
-  # shellcheck disable=SC2086  # config path には space 含まない前提
-  nohup agent-hub-bridges-claude \
-    --config "${AGENT_HUB_DIR}/config.yaml" \
+  # SIGHUP propagation を防ぐ)。 stdout/stderr を log file に redirect。
+  nohup agent-hub-bridge-claude \
+    --user "${USER_HANDLE}" \
     > "${AGENT_HUB_DIR}/logs/bridge.log" 2>&1 &
   local spawn_pid=$!
   disown "${spawn_pid}" 2>/dev/null || true   # Suggestion (a): job control 切断
