@@ -75,8 +75,8 @@ curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -
 
 これだけで以下が自動実行されます:
 - OS / Python pre-requisite check (= Docker は `--hub-mode self-host` 時のみ)
-- `agent-hub-bridges[claude]` + `agent-hub-roles[all]` を pip install (`--user`)
-- `~/.agent-hub/config.yaml` を生成 (= Tier 1 config、 default は `--hub-mode public` = `agent-hub-ki.fly.dev` に接続)
+- `agent-hub-bridges[claude]` を pip install (`--user`)
+- `~/.agent-hub/.env` を生成 (= `AGENT_HUB_URL` / `AGENT_HUB_TENANT`、 default は `--hub-mode public` = `agent-hub-ki.fly.dev` に接続)
 - bridge worker を background で起動 (= `~/.agent-hub/logs/bridge.log` に log)
 
 > ℹ️ `--hub-mode public` (default) では agent-hub-ki.fly.dev に接続するため **Docker image pull / 起動は行われません** (= Docker 未 install でも実行可能)。 self-host で local hub server を立てたい場合のみ `--hub-mode self-host` + Docker 必須。
@@ -98,7 +98,7 @@ Tier 1 は **試用 throwaway** 前提です。 もう使わない場合:
 
 ```bash
 rm -rf ~/.agent-hub
-pkill -f 'agent-hub-bridges-claude'
+pkill -f 'agent-hub-bridge-claude'
 ```
 
 本番運用したくなったら Tier 2 に **fresh start で移行** (= 下記参照)。
@@ -144,8 +144,8 @@ curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -
 
 これで:
 - step 1 で作成した fork (= `myname/agent-hub-roles`) を `~/.agent-hub/roles-repo` に clone
-- `~/.agent-hub/config.yaml` を Tier 2 marker (`tier: 2, roles_source: git-fork`) で生成
-- bridge worker が fork ベースの roles を読んで起動
+- `~/.agent-hub/.env` を生成 (= `AGENT_HUB_URL` / `AGENT_HUB_TENANT`)
+- bridge worker が起動 (`GITHUB_PAT` は caller env から継承)
 
 ### Step 5: 動作確認 + customization workflow
 
@@ -159,7 +159,7 @@ curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -
    git push  # ← team 共有 + upstream PR 可能
    ```
 
-3. bridge restart で新 roles を反映 (= 詳細は `agent-hub-bridges-claude` doc 参照)
+3. bridge restart で新 roles を反映 (= 詳細は `agent-hub-bridge-claude` doc 参照)
 
 ---
 

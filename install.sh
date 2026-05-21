@@ -10,8 +10,8 @@
 #   - Tier 1 (Try it):  fork なし、 `~/.agent-hub/` ローカルファイルで体験
 #   - Tier 2 (Own it):  private fork で知的資産累積 (= roles repo を git managed)
 #
-# Idempotent: 既に install 済の場合は config 上書きせずに hint 表示。
-# 非破壊: 既存 `~/.agent-hub/config.yaml` は **絶対に上書きしない** (= user 設定保護)。
+# Idempotent: 既に install 済の場合は .env 上書きせずに hint 表示。
+# 非破壊: 既存 `~/.agent-hub/.env` は **絶対に上書きしない** (= user 設定保護)。
 #
 # Refs: https://github.com/kishibashi3/agent-hub/issues/101
 
@@ -255,8 +255,8 @@ check_prereqs() {
 # ============================================================
 
 check_existing_install() {
-  if [[ -f "${AGENT_HUB_DIR}/config.yaml" ]]; then
-    warn "existing config detected at ${AGENT_HUB_DIR}/config.yaml"
+  if [[ -f "${AGENT_HUB_DIR}/.env" ]]; then
+    warn "existing env file detected at ${AGENT_HUB_DIR}/.env"
     warn "  → installer will preserve it (= 上書きせず)"
     warn "  → to switch Tier 1 → Tier 2: rm -rf ${AGENT_HUB_DIR} and rerun with --tier 2 --roles-repo <yours> (= fresh start)"
     warn "  → to reinstall from scratch: rm -rf ${AGENT_HUB_DIR} and rerun"
@@ -296,11 +296,12 @@ pull_docker_image() {
 }
 
 install_python_packages() {
-  info "Installing Python packages (agent-hub-bridges + agent-hub-roles)..."
+  info "Installing Python packages (agent-hub-bridges)..."
   # --user で user-site にインストール (= system Python を汚さない)
   # Minor 1 反映: array 渡し (= eval 廃止) で extras `[claude]` / `[all]` も
   # 各 token として正しく解釈される。
-  run_or_dry python3 -m pip install --user 'agent-hub-bridges[claude]' 'agent-hub-roles[all]'
+  # Note: agent-hub-roles は doc-only repo であり pip パッケージではない (= インストール不要)
+  run_or_dry python3 -m pip install --user 'agent-hub-bridges[claude]'
 
   # PATH hint (= user-site bin が PATH に通っていない場合の友好メッセージ)
   local user_bin
@@ -316,110 +317,78 @@ init_agent_hub_dir() {
   run_or_dry mkdir -p "${AGENT_HUB_DIR}/roles" "${AGENT_HUB_DIR}/logs"
 }
 
-write_config_tier1() {
-  local cfg="${AGENT_HUB_DIR}/config.yaml"
-  if [[ -f "${cfg}" ]]; then
-    info "Config exists at ${cfg}, preserving"
+clone_roles_repo() {
+  # Tier 2 のみ: private fork を ${AGENT_HUB_DIR}/roles-repo に clone
+  [[ "${TIER}" == "2" ]] || return 0
+  local roles_dir="${AGENT_HUB_DIR}/roles-repo"
+  if [[ -d "${roles_dir}" ]]; then
+    info "Roles repo already cloned at ${roles_dir}, skipping"
     return
   fi
-  info "Writing Tier 1 config to ${cfg}..."
-  if [[ "${DRY_RUN}" == "yes" ]]; then
-    c_dim "[dry-run] would write config.yaml (tier: 1, roles_source: pip-package)"
-    return
-  fi
-  cat > "${cfg}" <<EOF_CFG
-# agent-hub Tier 1 config (= Try it、 fork なし local 体験、 throwaway 前提)
-#
-# Tier 2 (= 私設 fork で knowledge 累積) への移行は fresh start:
-#   1. Fork agent-hub-roles template (= gh repo create --template ... --private)
-#   2. rm -rf ${AGENT_HUB_DIR} (= Tier 1 state を捨てる)
-#   3. installer を rerun with --tier 2 --roles-repo <yours>
-#   (= 自動 migration tool なし、 customization は手動 copy)
-#
-# Roles は agent-hub-roles[all] パッケージ標準のみ。
-# Customization は ${AGENT_HUB_DIR}/roles/ で local override (= 履歴残らず)。
-
-tier: 1
-roles_source: pip-package
-
-hub:
-  url: ${AGENT_HUB_HUB_URL_DEFAULT}
-  tenant: \${USER}     # 公開 hub では tenant 必須
-  auth:
-    github_pat: \${GITHUB_PAT}
-
-bridges:
-  - name: ${USER_HANDLE}
-    type: claude
-    role: default
-EOF_CFG
-  ok "Config written ✅"
+  info "Cloning ${ROLES_REPO} to ${roles_dir}..."
+  run_or_dry gh repo clone "${ROLES_REPO}" "${roles_dir}"
 }
 
-write_config_tier2() {
-  local cfg="${AGENT_HUB_DIR}/config.yaml"
-  if [[ -f "${cfg}" ]]; then
-    info "Config exists at ${cfg}, preserving"
+write_env_file() {
+  # config.yaml を廃止し env inject 方式に統一。
+  # AGENT_HUB_URL / AGENT_HUB_TENANT を ${AGENT_HUB_DIR}/.env に書く。
+  # GITHUB_PAT は caller env から継承 (秘密情報をファイルに書かない)。
+  local env_file="${AGENT_HUB_DIR}/.env"
+  if [[ -f "${env_file}" ]]; then
+    info "Env file exists at ${env_file}, preserving"
     return
   fi
-  info "Cloning ${ROLES_REPO} to ${AGENT_HUB_DIR}/roles-repo..."
-  run_or_dry gh repo clone "${ROLES_REPO}" "${AGENT_HUB_DIR}/roles-repo"
-
-  info "Writing Tier 2 config to ${cfg}..."
+  info "Writing env file to ${env_file}..."
   if [[ "${DRY_RUN}" == "yes" ]]; then
-    c_dim "[dry-run] would write config.yaml (tier: 2, roles_source: git-fork)"
+    c_dim "[dry-run] would write ${env_file} (AGENT_HUB_URL, AGENT_HUB_TENANT)"
     return
   fi
-  cat > "${cfg}" <<EOF_CFG
-# agent-hub Tier 2 config (= Own it、 private fork で知的資産累積)
-#
-# Roles は ${ROLES_REPO} (= private fork) を git managed。
-# Customization は ${AGENT_HUB_DIR}/roles-repo/roles/ で編集 → git commit + push。
-
-tier: 2
-roles_source: git-fork
-roles_repo: ${ROLES_REPO}
-
-hub:
-  url: ${AGENT_HUB_HUB_URL_DEFAULT}
-  tenant: \${USER}     # 公開 hub では tenant 必須
-  auth:
-    github_pat: \${GITHUB_PAT}
-
-bridges:
-  - name: ${USER_HANDLE}
-    type: claude
-    role: default
-EOF_CFG
-  ok "Config written ✅"
+  cat > "${env_file}" <<EOF
+AGENT_HUB_URL=${AGENT_HUB_HUB_URL_DEFAULT}
+AGENT_HUB_TENANT=${USER:-${USER_HANDLE}}
+EOF
+  chmod 600 "${env_file}"
+  ok "Env file written (${env_file}) ✅"
 }
 
 start_bridge() {
   info "Starting bridge worker in background (logs: ${AGENT_HUB_DIR}/logs/bridge.log)..."
   if [[ "${DRY_RUN}" == "yes" ]]; then
-    c_dim "[dry-run] would spawn: agent-hub-bridges-claude --config ${AGENT_HUB_DIR}/config.yaml"
+    c_dim "[dry-run] would spawn: AGENT_HUB_URL=<url> agent-hub-bridge-claude --user ${USER_HANDLE}"
     return
   fi
 
   # Minor 2 反映: 既に bridge が動いていれば respawn しない (= idempotency 100% 担保)。
-  # pgrep で `agent-hub-bridges-claude --config <this config path>` を grep、
-  # 同 config の bridge が見つかれば skip + hint。 別 config で別 bridge を動かしている
-  # case (= 同一 host で複数 handle 運用) は false positive 回避のため `-f` で full
-  # command line match + config path で限定。
-  if pgrep -f "agent-hub-bridges-claude.*${AGENT_HUB_DIR}/config.yaml" >/dev/null 2>&1; then
+  # pgrep で `agent-hub-bridge-claude --user <handle>` を grep、
+  # 同 handle の bridge が見つかれば skip + hint。
+  if pgrep -f "agent-hub-bridge-claude.*--user.*${USER_HANDLE}" >/dev/null 2>&1; then
     local existing_pid
-    existing_pid=$(pgrep -f "agent-hub-bridges-claude.*${AGENT_HUB_DIR}/config.yaml" | head -1)
+    existing_pid=$(pgrep -f "agent-hub-bridge-claude.*--user.*${USER_HANDLE}" | head -1)
     warn "Bridge worker already running (PID: ${existing_pid}). Skipping spawn."
     warn "  → to respawn: kill ${existing_pid} && rerun installer"
     return
   fi
 
+  # bridge CLI は --user <handle> + env vars 方式 (--config フラグは未実装)。
+  # .env から env vars を読み込み、未設定の場合は installer 変数で補完する。
+  # GITHUB_PAT は caller env から継承 (秘密情報をファイルに書かない)。
+  if [[ -f "${AGENT_HUB_DIR}/.env" ]]; then
+    # shellcheck source=/dev/null
+    set -a; source "${AGENT_HUB_DIR}/.env"; set +a
+  fi
+  : "${AGENT_HUB_URL:=${AGENT_HUB_HUB_URL_DEFAULT}}"
+  : "${AGENT_HUB_TENANT:=${USER:-${USER_HANDLE}}}"
+  export AGENT_HUB_URL AGENT_HUB_TENANT
+
+  if [[ -z "${GITHUB_PAT:-}" ]]; then
+    warn "GITHUB_PAT is not set. Bridge will fail to authenticate."
+    warn "  Set it with: export GITHUB_PAT=<your-github-pat>"
+  fi
+
   # nohup + & で daemonize + disown で shell 親子関係を切断 (= Suggestion (a) 反映、
-  # agent-hub-roles start.sh と pattern を揃え、 SIGHUP propagation を防ぐ)。
-  # stdout/stderr を log file に redirect。
-  # shellcheck disable=SC2086  # config path には space 含まない前提
-  nohup agent-hub-bridges-claude \
-    --config "${AGENT_HUB_DIR}/config.yaml" \
+  # SIGHUP propagation を防ぐ)。 stdout/stderr を log file に redirect。
+  nohup agent-hub-bridge-claude \
+    --user "${USER_HANDLE}" \
     > "${AGENT_HUB_DIR}/logs/bridge.log" 2>&1 &
   local spawn_pid=$!
   disown "${spawn_pid}" 2>/dev/null || true   # Suggestion (a): job control 切断
@@ -436,7 +405,7 @@ print_summary() {
   c_green "  agent-hub bootstrapped (Tier ${TIER}) ✅"
   c_green "═══════════════════════════════════════════════════════════════"
   echo
-  echo "  Config:  ${AGENT_HUB_DIR}/config.yaml"
+  echo "  Env:     ${AGENT_HUB_DIR}/.env"
   echo "  Logs:    ${AGENT_HUB_DIR}/logs/"
   echo "  Hub:     ${AGENT_HUB_HUB_URL_DEFAULT}"
   echo "  Handle:  @${USER_HANDLE}"
@@ -478,11 +447,8 @@ main() {
   install_python_packages
   init_agent_hub_dir
 
-  if [[ "${TIER}" == "1" ]]; then
-    write_config_tier1
-  else
-    write_config_tier2
-  fi
+  clone_roles_repo   # Tier 2 のみ: private fork clone
+  write_env_file     # AGENT_HUB_URL / AGENT_HUB_TENANT を .env に書く
 
   start_bridge
   print_summary
