@@ -98,7 +98,7 @@ Tier 1 は **試用 throwaway** 前提です。 もう使わない場合:
 
 ```bash
 rm -rf ~/.agent-hub
-pkill -f 'agent-hub-bridges-claude'
+pkill -f 'agent-hub-bridge-claude'
 ```
 
 本番運用したくなったら Tier 2 に **fresh start で移行** (= 下記参照)。
@@ -159,7 +159,7 @@ curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -
    git push  # ← team 共有 + upstream PR 可能
    ```
 
-3. bridge restart で新 roles を反映 (= 詳細は `agent-hub-bridges-claude` doc 参照)
+3. bridge restart で新 roles を反映 (= 詳細は `agent-hub-bridge-claude` doc 参照)
 
 ---
 
