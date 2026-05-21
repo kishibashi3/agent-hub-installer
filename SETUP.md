@@ -216,6 +216,7 @@ export AGENT_HUB_URL=http://localhost:3000/mcp
 
 curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -s -- \
   --hub-mode self-host \
+  --edition community \
   --user mybot
 ```
 
