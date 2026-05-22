@@ -441,7 +441,7 @@ print_ce_admin_setup_guide() {
   c_blue "  CE Admin Setup — required before other peers can join"
   c_blue "═══════════════════════════════════════════════════════════════"
   echo
-  echo "  Your hub is running. Now claim @admin to initialize the deployment."
+  echo "  Once your hub is running (docker-compose up -d), claim @admin to initialize the deployment."
   echo
   c_bold "  Step 1: Set environment variables"
   echo "    export GITHUB_PAT=ghp_..."
