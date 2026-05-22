@@ -432,6 +432,48 @@ print_summary() {
 }
 
 # ============================================================
+# CE admin setup guidance (= community edition + self-host only)
+# ============================================================
+
+print_ce_admin_setup_guide() {
+  echo
+  c_blue "═══════════════════════════════════════════════════════════════"
+  c_blue "  CE Admin Setup — required before other peers can join"
+  c_blue "═══════════════════════════════════════════════════════════════"
+  echo
+  echo "  Your hub is running. Now claim @admin to initialize the deployment."
+  echo
+  c_bold "  Step 1: Set environment variables"
+  echo "    export GITHUB_PAT=ghp_..."
+  c_dim "             # GitHub → Settings → Personal Access Tokens (scope: read:user)"
+  echo "    export AGENT_HUB_URL=http://localhost:3000/mcp"
+  c_dim "             # (or your server URL if different)"
+  echo "    export AGENT_HUB_USER=admin"
+  c_dim "             # fixes your Claude Code handle to @admin (TOFU operator claim)"
+  echo
+  c_bold "  Step 2: Install agent-hub-plugin in Claude Code (skip if already installed)"
+  c_dim "    /plugin marketplace add https://github.com/kishibashi3/kishibashi3-plugins-claude"
+  c_dim "    /plugin install agent-hub-plugin"
+  echo
+  c_bold "  Step 3: Claim @admin via Claude Code"
+  echo "    → Use the 'register' tool with name=\"admin\""
+  c_dim "    → The deployment init gate opens once @admin is claimed"
+  c_dim "      (until then, all other access is blocked with 503)"
+  echo
+  c_bold "  Step 4: Claim your tenant (recommended)"
+  echo "    export AGENT_HUB_TENANT=<your-tenant-name>"
+  echo "    → Re-run register — you become the TOFU owner of that tenant"
+  echo
+  c_bold "  Step 5: Start peer bridges"
+  echo "    scripts/start.sh all   (from your roles repo)"
+  c_dim "    → spawns @reviewer / @planner / @researcher / @writer bridges"
+  echo
+  c_dim "  Full walkthrough : https://github.com/kishibashi3/agent-hub/blob/main/docs/ce-onboarding.md"
+  c_dim "  Admin ops guide  : roles/admin/CLAUDE.md  (in your roles repo)"
+  echo
+}
+
+# ============================================================
 # Main
 # ============================================================
 
@@ -452,6 +494,11 @@ main() {
 
   start_bridge
   print_summary
+
+  # CE + self-host: admin setup ガイダンスを print (= deployment init gate の次のステップを案内)
+  if [[ "${HUB_MODE}" == "self-host" ]] && [[ "${EDITION}" == "community" ]]; then
+    print_ce_admin_setup_guide
+  fi
 }
 
 main "$@"
