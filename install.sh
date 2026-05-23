@@ -255,9 +255,7 @@ check_prereqs() {
     fi
     info "gh CLI authenticated ✅"
 
-    if [[ -z "${ROLES_REPO}" ]]; then
-      die "Tier 2 requires --roles-repo <owner/name>. Create one via: gh repo create --template kishibashi3/agent-hub-roles --private"
-    fi
+    # ROLES_REPO が未指定でも auto_fork_roles_repo() が自動 fork するため ここでは die しない。
   fi
 
   if [[ "${HUB_MODE}" == "self-host" ]] && [[ -z "${EDITION}" ]]; then
@@ -330,6 +328,25 @@ install_python_packages() {
 init_agent_hub_dir() {
   info "Initializing ${AGENT_HUB_DIR}..."
   run_or_dry mkdir -p "${AGENT_HUB_DIR}/roles" "${AGENT_HUB_DIR}/logs"
+}
+
+auto_fork_roles_repo() {
+  # Tier 2 で --roles-repo が未指定の場合、kishibashi3/agent-hub-roles を自動 fork する。
+  # fork 先は "<gh-login>/agent-hub-roles" (private) とし ROLES_REPO にセットする。
+  # --roles-repo が既に指定済みの場合は何もしない。
+  [[ "${TIER}" == "2" ]] || return 0
+  [[ -z "${ROLES_REPO}" ]] || return 0
+
+  local template_repo="kishibashi3/agent-hub-roles"
+  local gh_user
+  gh_user=$(gh api user --jq '.login')
+  local target_repo="${gh_user}/agent-hub-roles"
+
+  info "--roles-repo not specified. Auto-forking ${template_repo}..."
+  run_or_dry gh repo create --template "${template_repo}" --private "${target_repo}"
+
+  ROLES_REPO="${target_repo}"
+  ok "Forked to ${target_repo} ✅"
 }
 
 clone_roles_repo() {
@@ -499,6 +516,7 @@ main() {
   info "Args: tier=${TIER}, user=${USER_HANDLE}, hub-mode=${HUB_MODE}, roles-repo=${ROLES_REPO:-(none)}, dry-run=${DRY_RUN}"
 
   check_prereqs
+  auto_fork_roles_repo  # Tier 2 + --roles-repo 未指定時に自動 fork (issue #15)
   check_existing_install
   pull_docker_image
   install_python_packages
