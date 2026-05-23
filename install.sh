@@ -43,6 +43,7 @@ c_red()    { printf '\033[31m%s\033[0m\n' "$*"; }
 c_green()  { printf '\033[32m%s\033[0m\n' "$*"; }
 c_yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 c_blue()   { printf '\033[34m%s\033[0m\n' "$*"; }
+c_bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
 c_dim()    { printf '\033[2m%s\033[0m\n' "$*"; }
 
 info()  { c_blue   "[info]  $*"; }
