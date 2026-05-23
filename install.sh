@@ -316,7 +316,7 @@ install_python_packages() {
   # Minor 1 反映: array 渡し (= eval 廃止) で extras `[claude]` / `[all]` も
   # 各 token として正しく解釈される。
   # Note: agent-hub-roles は doc-only repo であり pip パッケージではない (= インストール不要)
-  run_or_dry python3 -m pip install --user 'agent-hub-bridges[claude]'
+  run_or_dry python3 -m pip install --user 'agent-hub-bridges[claude] @ git+https://github.com/kishibashi3/agent-hub-bridges.git'
 
   # PATH hint (= user-site bin が PATH に通っていない場合の友好メッセージ)
   local user_bin
