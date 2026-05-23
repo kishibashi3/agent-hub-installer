@@ -23,7 +23,7 @@ set -euo pipefail
 
 INSTALLER_VERSION="0.1.0"
 AGENT_HUB_DIR="${AGENT_HUB_DIR:-${HOME}/.agent-hub}"
-AGENT_HUB_HUB_URL_DEFAULT="https://agent-hub-ki.fly.dev/mcp"
+AGENT_HUB_URL_DEFAULT="https://agent-hub-ki.fly.dev/mcp"
 DOCKER_IMAGE="ghcr.io/kishibashi3/agent-hub:latest"
 
 # Args defaults
@@ -236,6 +236,20 @@ check_prereqs() {
 
   if [[ "${TIER}" == "2" ]]; then
     check_command gh "Install gh CLI from https://cli.github.com/ (Tier 2 で private fork access に必要)"
+    # gh auth token は gh 2.6.0 以降で追加されたサブコマンド。
+    # Ubuntu 22.04 標準 apt の gh は 2.4.0 で未対応のため version check + WARN を表示する。
+    local gh_version
+    gh_version=$(gh --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "0.0.0")
+    local gh_major gh_minor
+    gh_major=$(echo "${gh_version}" | cut -d. -f1)
+    gh_minor=$(echo "${gh_version}" | cut -d. -f2)
+    if [[ "${gh_major}" -lt 2 ]] || { [[ "${gh_major}" -eq 2 ]] && [[ "${gh_minor}" -lt 6 ]]; }; then
+      warn "gh CLI version ${gh_version} is outdated (need 2.6.0+)."
+      warn "  Ubuntu 22.04 標準 apt では古い版が入ります。公式インストール手順で更新してください:"
+      warn "  https://github.com/cli/cli/blob/trunk/docs/install_linux.md"
+      warn "  → GITHUB_PAT を手動で export して続行することもできます:"
+      warn "  →   export GITHUB_PAT=ghp_..."
+    fi
     if ! gh auth status >/dev/null 2>&1; then
       die "gh CLI not authenticated. Run: gh auth login"
     fi
@@ -345,7 +359,7 @@ write_env_file() {
     return
   fi
   cat > "${env_file}" <<EOF
-AGENT_HUB_URL=${AGENT_HUB_HUB_URL_DEFAULT}
+AGENT_HUB_URL=${AGENT_HUB_URL_DEFAULT}
 AGENT_HUB_TENANT=${USER:-${USER_HANDLE}}
 EOF
   chmod 600 "${env_file}"
@@ -377,7 +391,7 @@ start_bridge() {
     # shellcheck source=/dev/null
     set -a; source "${AGENT_HUB_DIR}/.env"; set +a
   fi
-  : "${AGENT_HUB_URL:=${AGENT_HUB_HUB_URL_DEFAULT}}"
+  : "${AGENT_HUB_URL:=${AGENT_HUB_URL_DEFAULT}}"
   : "${AGENT_HUB_TENANT:=${USER:-${USER_HANDLE}}}"
   export AGENT_HUB_URL AGENT_HUB_TENANT
 
@@ -408,7 +422,7 @@ print_summary() {
   echo
   echo "  Env:     ${AGENT_HUB_DIR}/.env"
   echo "  Logs:    ${AGENT_HUB_DIR}/logs/"
-  echo "  Hub:     ${AGENT_HUB_HUB_URL_DEFAULT}"
+  echo "  Hub:     ${AGENT_HUB_URL:-${AGENT_HUB_URL_DEFAULT}}"
   echo "  Handle:  @${USER_HANDLE}"
   echo
   if [[ "${TIER}" == "1" ]]; then
