@@ -343,10 +343,12 @@ auto_fork_roles_repo() {
   local target_repo="${gh_user}/agent-hub-roles"
 
   info "--roles-repo not specified. Auto-forking ${template_repo}..."
-  run_or_dry gh repo create --template "${template_repo}" --private "${target_repo}"
+  run_or_dry gh repo create --template "${template_repo}" --private "${target_repo}" \
+    || die "Auto-fork failed (repo name conflict?). Retry with: --roles-repo ${target_repo}"
 
   ROLES_REPO="${target_repo}"
-  ok "Forked to ${target_repo} ✅"
+  # dry-run 時は fork を実行していないため成功メッセージを出さない (PR #16 Minor 1)
+  [[ "${DRY_RUN}" != "yes" ]] && ok "Forked to ${target_repo} ✅"
 }
 
 clone_roles_repo() {
