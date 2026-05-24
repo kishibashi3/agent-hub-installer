@@ -486,7 +486,7 @@ print_ce_admin_setup_guide() {
   c_dim "             # fixes your Claude Code handle to @admin (TOFU operator claim)"
   echo
   c_bold "  Step 2: Install agent-hub-plugin in Claude Code (skip if already installed)"
-  c_dim "    /plugin marketplace add https://github.com/kishibashi3/kishibashi3-plugins-claude"
+  c_dim "    /plugin marketplace add https://github.com/kishibashi3/agent-hub-plugins-claude"
   c_dim "    /plugin install agent-hub-plugin"
   echo
   c_bold "  Step 3: Claim @admin via Claude Code"
