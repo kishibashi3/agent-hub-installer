@@ -192,16 +192,11 @@ check_command() {
   info "${cmd} found ✅"
 }
 
-check_python_version() {
-  # Suggestion (b) 反映: arithmetic context (( ... )) を使って numeric comparison を idiomatic に
-  local py_version major minor
-  py_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "0.0")
-  major="${py_version%.*}"
-  minor="${py_version#*.}"
-  if (( major < 3 )) || (( major == 3 && minor < 10 )); then
-    die "Python 3.10+ required, found ${py_version}. Install Python 3.10 or newer."
-  fi
-  info "python3 ${py_version} ✅"
+install_uv_python() {
+  # uv python install で Python 3.12 を固定インストール。
+  # pip / python3 直接呼び出しを廃止し、 uv が Python version を管理する。
+  info "Installing Python 3.12 via uv..."
+  run_or_dry uv python install 3.12
 }
 
 # Suggestion (d) 反映: --user handle の validation (= alphanumeric + `-_` のみ)
@@ -221,8 +216,9 @@ check_prereqs() {
   info "Checking prerequisites..."
   check_user_handle "${USER_HANDLE}"   # Suggestion (d) 反映、 early reject
   check_os
-  check_command python3 "Install Python 3.10+ from https://www.python.org/"
-  check_python_version
+  # uv が Python 管理を担うため python3 直接 check は廃止。
+  # uv がなければ installer を進められないため early reject。
+  check_command uv "Install uv from https://docs.astral.sh/uv/getting-started/installation/"
 
   # Docker は **`--hub-mode self-host` の時のみ必須** (= PR #2 review Suggestion 1 反映、
   # Minor 3 の natural 延長)。 public mode (= agent-hub-ki.fly.dev に接続) では
@@ -309,20 +305,13 @@ pull_docker_image() {
 }
 
 install_python_packages() {
-  info "Installing Python packages (agent-hub-bridges)..."
-  # --user で user-site にインストール (= system Python を汚さない)
-  # Minor 1 反映: array 渡し (= eval 廃止) で extras `[claude]` / `[all]` も
-  # 各 token として正しく解釈される。
+  info "Installing Python packages (agent-hub-bridges) via uv tool install..."
+  # uv tool install で agent-hub-bridges[claude] を Python 3.12 環境にインストール。
+  # pip install --user を廃止: uv が PATH / Python version を自動管理するため
+  # PATH warn は不要になった (= uv が ~/.local/bin を適切に管理する)。
   # Note: agent-hub-roles は doc-only repo であり pip パッケージではない (= インストール不要)
-  run_or_dry python3 -m pip install --user 'agent-hub-bridges[claude] @ git+https://github.com/kishibashi3/agent-hub-bridges.git'
-
-  # PATH hint (= user-site bin が PATH に通っていない場合の友好メッセージ)
-  local user_bin
-  user_bin=$(python3 -m site --user-base 2>/dev/null)/bin
-  if [[ ":${PATH}:" != *":${user_bin}:"* ]]; then
-    warn "${user_bin} is not in PATH. Add to your shell rc:"
-    warn "  export PATH=\"${user_bin}:\$PATH\""
-  fi
+  run_or_dry uv tool install --python 3.12 \
+    'agent-hub-bridges[claude] @ git+https://github.com/kishibashi3/agent-hub-bridges.git'
 }
 
 init_agent_hub_dir() {
@@ -518,6 +507,7 @@ main() {
   info "Args: tier=${TIER}, user=${USER_HANDLE}, hub-mode=${HUB_MODE}, roles-repo=${ROLES_REPO:-(none)}, dry-run=${DRY_RUN}"
 
   check_prereqs
+  install_uv_python     # uv で Python 3.12 を確保 (issue #18)
   auto_fork_roles_repo  # Tier 2 + --roles-repo 未指定時に自動 fork (issue #15)
   check_existing_install
   pull_docker_image
