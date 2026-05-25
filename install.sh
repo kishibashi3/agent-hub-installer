@@ -502,40 +502,56 @@ start_bridge() {
 # ============================================================
 
 print_summary() {
+  local hub_url="${AGENT_HUB_URL:-${AGENT_HUB_URL_DEFAULT}}"
   echo
-  c_green "═══════════════════════════════════════════════════════════════"
-  c_green "  agent-hub bootstrapped (Tier ${TIER}) ✅"
-  c_green "═══════════════════════════════════════════════════════════════"
+  c_green "════════════════════════════════════════════════════════"
+  c_green "  agent-hub bootstrapped (Tier ${TIER}) ✅  — 4 steps to first chat"
+  c_green "════════════════════════════════════════════════════════"
   echo
-  echo "  Env:     ${AGENT_HUB_DIR}/.env"
-  echo "  Logs:    ${AGENT_HUB_DIR}/logs/"
-  echo "  Hub:     ${AGENT_HUB_URL:-${AGENT_HUB_URL_DEFAULT}}"
-  echo "  Handle:  @${USER_HANDLE}"
+  echo "  Handle: @${USER_HANDLE}    Hub: ${hub_url}"
   echo
-  if [[ "${TIER}" == "1" ]]; then
-    c_yellow "  Tier 1 (Try it) — ローカル体験用 (= throwaway 前提)"
-    echo
-    echo "  To use Tier 2 (= 私設 fork で knowledge 累積、 team 共有):"
-    echo "    1. Fork: gh repo create --template kishibashi3/agent-hub-roles --private <yourname>/agent-hub-roles"
-    echo "    2. Rerun installer:"
-    c_dim "       curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -s -- \\"
-    c_dim "         --tier 2 --roles-repo <yourname>/agent-hub-roles --user ${USER_HANDLE}"
-    echo "    (= fresh start、 Tier 1 customization は手動 copy が必要)"
-  else
+  if [[ "${TIER}" == "2" ]]; then
     c_yellow "  Tier 2 (Own it) — fork-based persistent customization"
-    echo
     echo "  Roles repo: ${ROLES_REPO}"
     echo "  → \`git -C ${AGENT_HUB_DIR}/roles-repo push\` で team 共有"
+    echo
   fi
+  c_bold "  ─── Opening ceremony ────────────────────────────────────"
   echo
-  echo "  Next:"
-  echo "    source ~/.agent-hub/env.sh"
+  echo "  [1/4] GITHUB_PAT を設定 (bridge 認証に必要):"
   echo "    export GITHUB_PAT=\$(gh auth token)"
+  c_dim "    # gh なし? → https://github.com/settings/tokens (scope: read:user)"
+  echo
+  echo "  [2/4] env を load して bridge を確認:"
+  echo "    source ~/.agent-hub/env.sh"
+  echo "    tail -5 ~/.agent-hub/logs/bridge.log"
+  c_dim "    # \"registered\" が見えれば OK"
+  echo
+  echo "  [3/4] Claude Code を起動 + plugin を確認:"
   echo "    claude"
+  c_dim "    # Claude Code 内: /mcp → agent-hub が見えれば OK"
+  c_dim "    # 見えない? → /plugin install agent-hub-plugin"
   echo
-  echo "  Then in Claude Code: '@${USER_HANDLE} hello'"
+  echo "  [4/4] 初回メッセージを送信:"
+  echo "    @${USER_HANDLE} hello"
+  c_dim "    # → 返信が来たら 🎉"
   echo
-  c_dim "  Refs: https://github.com/kishibashi3/agent-hub/issues/101"
+  c_bold "  ─── トラブルシュート ────────────────────────────────────"
+  echo "  Bridge log : tail -f ~/.agent-hub/logs/bridge.log"
+  echo "  Bridge PID : pgrep -f agent-hub-bridge-claude"
+  echo "  Restart    : pkill -f \"agent-hub-bridge-claude.*--user.*${USER_HANDLE}\" && \\"
+  echo "               nohup agent-hub-bridge-claude --user ${USER_HANDLE} \\"
+  echo "                 >> ~/.agent-hub/logs/bridge.log 2>&1 &"
+  c_dim "  Full guide : https://github.com/kishibashi3/agent-hub-installer/blob/main/SETUP.md"
+  echo
+  if [[ "${TIER}" == "1" ]]; then
+    c_dim "  ─── Tier 2 へのステップアップ (= 本番運用・team 共有) ──────"
+    c_dim "  1. Fork: gh repo create --template kishibashi3/agent-hub-roles --private <yourname>/agent-hub-roles"
+    c_dim "  2. Rerun: curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -s -- \\"
+    c_dim "              --tier 2 --roles-repo <yourname>/agent-hub-roles --user ${USER_HANDLE}"
+    c_dim "  (fresh start — Tier 1 customization は手動 copy が必要)"
+    echo
+  fi
 }
 
 # ============================================================
