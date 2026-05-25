@@ -413,6 +413,42 @@ EOF
   ok "Env file written (${env_file}) ✅"
 }
 
+write_env_sh() {
+  # installer 完了時に Claude Code (MCP client) 側の shell env を source できる
+  # env.sh を生成する (issue #22)。
+  # bridge worker 側は ~/.agent-hub/.env で管理するが、 Claude Code (= MCP client) 起動時
+  # の shell env は user が手動 export しない限り引き継がれず、 silent failure を招く。
+  # env.sh を source してから claude を起動することで env propagation を installer が担う。
+  # GITHUB_PAT は secret hygiene のため書かない (caller env / gh auth token で取得)。
+  # 既存の env.sh は上書きしない (= .env と同じ idempotent 方針)。
+  local env_sh="${AGENT_HUB_DIR}/env.sh"
+  if [[ -f "${env_sh}" ]]; then
+    info "env.sh exists at ${env_sh}, preserving"
+    return
+  fi
+  info "Writing env.sh to ${env_sh}..."
+  if [[ "${DRY_RUN}" == "yes" ]]; then
+    c_dim "[dry-run] would write ${env_sh} (AGENT_HUB_URL=${AGENT_HUB_URL}, AGENT_HUB_TENANT=${USER_HANDLE})"
+    return
+  fi
+  # Critical (issue #22 review): コメント行に $(gh auth token) があるため、
+  # <<EOF (unquoted) では heredoc 展開時に command substitution が実行されてしまう。
+  # → <<'EOF' (quoted heredoc) でコメント部分を書くことで展開を完全に防ぐ。
+  # Minor: 変数行は printf '%s' で書き、引用符を付ける (= source 時の特殊文字対策)。
+  cat > "${env_sh}" <<'EOF'
+# agent-hub shell env (issue #22)
+# source this file before launching Claude Code:
+#   source ~/.agent-hub/env.sh
+#   export GITHUB_PAT=$(gh auth token)
+#   claude
+# GITHUB_PAT はここには書かない (secret hygiene)。
+EOF
+  printf 'export AGENT_HUB_URL="%s"\nexport AGENT_HUB_TENANT="%s"\n' \
+    "${AGENT_HUB_URL}" "${USER_HANDLE}" >> "${env_sh}"
+  chmod 600 "${env_sh}"
+  ok "env.sh written (${env_sh}) ✅"
+}
+
 start_bridge() {
   info "Starting bridge worker in background (logs: ${AGENT_HUB_DIR}/logs/bridge.log)..."
   if [[ "${DRY_RUN}" == "yes" ]]; then
@@ -492,7 +528,12 @@ print_summary() {
     echo "  → \`git -C ${AGENT_HUB_DIR}/roles-repo push\` で team 共有"
   fi
   echo
-  echo "  Next: open Claude Code, send '@${USER_HANDLE} hello'"
+  echo "  Next:"
+  echo "    source ~/.agent-hub/env.sh"
+  echo "    export GITHUB_PAT=\$(gh auth token)"
+  echo "    claude"
+  echo
+  echo "  Then in Claude Code: '@${USER_HANDLE} hello'"
   echo
   c_dim "  Refs: https://github.com/kishibashi3/agent-hub/issues/101"
 }
@@ -560,6 +601,7 @@ main() {
 
   clone_roles_repo   # Tier 2 のみ: private fork clone
   write_env_file     # AGENT_HUB_URL / AGENT_HUB_TENANT を .env に書く
+  write_env_sh       # Claude Code 起動用 env.sh を生成 (issue #22)
 
   start_bridge
   print_summary
