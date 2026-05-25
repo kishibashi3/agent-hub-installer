@@ -502,7 +502,7 @@ start_bridge() {
 # ============================================================
 
 print_summary() {
-  local hub_url="${AGENT_HUB_URL:-${AGENT_HUB_URL_DEFAULT}}"
+  local hub_url="${AGENT_HUB_URL}"
   echo
   c_green "════════════════════════════════════════════════════════"
   c_green "  agent-hub bootstrapped (Tier ${TIER}) ✅  — 4 steps to first chat"
@@ -530,7 +530,8 @@ print_summary() {
   echo "  [3/4] Claude Code を起動 + plugin を確認:"
   echo "    claude"
   c_dim "    # Claude Code 内: /mcp → agent-hub が見えれば OK"
-  c_dim "    # 見えない? → /plugin install agent-hub-plugin"
+  c_dim "    # 見えない? → /plugin marketplace add https://github.com/kishibashi3/agent-hub-plugins-claude"
+  c_dim "    #              /plugin install agent-hub-plugin"
   echo
   echo "  [4/4] 初回メッセージを送信:"
   echo "    @${USER_HANDLE} hello"
@@ -539,7 +540,9 @@ print_summary() {
   c_bold "  ─── トラブルシュート ────────────────────────────────────"
   echo "  Bridge log : tail -f ~/.agent-hub/logs/bridge.log"
   echo "  Bridge PID : pgrep -f agent-hub-bridge-claude"
-  echo "  Restart    : pkill -f \"agent-hub-bridge-claude.*--user.*${USER_HANDLE}\" && \\"
+  echo "  Restart    : export GITHUB_PAT=\$(gh auth token)  # gh なし? → 手動で export"
+  echo "               pkill -f \"agent-hub-bridge-claude.*--user.*${USER_HANDLE}\" || true"
+  echo "               source ~/.agent-hub/env.sh"
   echo "               nohup agent-hub-bridge-claude --user ${USER_HANDLE} \\"
   echo "                 >> ~/.agent-hub/logs/bridge.log 2>&1 &"
   c_dim "  Full guide : https://github.com/kishibashi3/agent-hub-installer/blob/main/SETUP.md"
