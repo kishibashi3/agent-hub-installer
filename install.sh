@@ -431,17 +431,20 @@ write_env_sh() {
     c_dim "[dry-run] would write ${env_sh} (AGENT_HUB_URL=${AGENT_HUB_URL}, AGENT_HUB_TENANT=${USER_HANDLE})"
     return
   fi
-  # shellcheck disable=SC2154  # 変数は resolve_hub_url() + parse_args() で確定済み
-  cat > "${env_sh}" <<EOF
+  # Critical (issue #22 review): コメント行に $(gh auth token) があるため、
+  # <<EOF (unquoted) では heredoc 展開時に command substitution が実行されてしまう。
+  # → <<'EOF' (quoted heredoc) でコメント部分を書くことで展開を完全に防ぐ。
+  # Minor: 変数行は printf '%s' で書き、引用符を付ける (= source 時の特殊文字対策)。
+  cat > "${env_sh}" <<'EOF'
 # agent-hub shell env (issue #22)
 # source this file before launching Claude Code:
 #   source ~/.agent-hub/env.sh
-#   export GITHUB_PAT=\$(gh auth token)
+#   export GITHUB_PAT=$(gh auth token)
 #   claude
 # GITHUB_PAT はここには書かない (secret hygiene)。
-export AGENT_HUB_URL=${AGENT_HUB_URL}
-export AGENT_HUB_TENANT=${USER_HANDLE}
 EOF
+  printf 'export AGENT_HUB_URL="%s"\nexport AGENT_HUB_TENANT="%s"\n' \
+    "${AGENT_HUB_URL}" "${USER_HANDLE}" >> "${env_sh}"
   chmod 600 "${env_sh}"
   ok "env.sh written (${env_sh}) ✅"
 }
