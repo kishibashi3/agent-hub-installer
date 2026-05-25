@@ -432,14 +432,18 @@ start_bridge() {
   fi
 
   # bridge CLI は --user <handle> + env vars 方式 (--config フラグは未実装)。
-  # .env から env vars を読み込み、未設定の場合は installer 変数で補完する。
+  # AGENT_HUB_URL は resolve_hub_url() で既に export 済み。
+  # .env が存在する場合は source して bridge に伝播させる (.env 内の値が優先)。
   # GITHUB_PAT は caller env から継承 (秘密情報をファイルに書かない)。
   if [[ -f "${AGENT_HUB_DIR}/.env" ]]; then
     # shellcheck source=/dev/null
     set -a; source "${AGENT_HUB_DIR}/.env"; set +a
   fi
-  : "${AGENT_HUB_URL:=${AGENT_HUB_URL_DEFAULT}}"
-  : "${AGENT_HUB_TENANT:=${USER:-${USER_HANDLE}}}"
+  # AGENT_HUB_URL: resolve_hub_url() + .env source により必ず設定済み。
+  # fly.dev 固定 default への silent fallback を廃止 (issue #20 修正と整合)。
+  : "${AGENT_HUB_URL:=${AGENT_HUB_URL}}"       # no-op: resolve_hub_url() で export 済み
+  # AGENT_HUB_TENANT: --user 指定 handle を正本とする (write_env_file() と統一)。
+  : "${AGENT_HUB_TENANT:=${USER_HANDLE}}"
   export AGENT_HUB_URL AGENT_HUB_TENANT
 
   if [[ -z "${GITHUB_PAT:-}" ]]; then
