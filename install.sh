@@ -24,6 +24,7 @@ set -euo pipefail
 INSTALLER_VERSION="0.1.0"
 AGENT_HUB_DIR="${AGENT_HUB_DIR:-${HOME}/.agent-hub}"
 AGENT_HUB_URL_DEFAULT="https://agent-hub-ki.fly.dev/mcp"
+AGENT_HUB_URL_SELFHOST_DEFAULT="http://localhost:3000/mcp"
 DOCKER_IMAGE="ghcr.io/kishibashi3/agent-hub:latest"
 
 # Args defaults
@@ -31,6 +32,7 @@ USER_HANDLE=""
 TIER="1"
 ROLES_REPO=""
 HUB_MODE="public"   # public | self-host
+HUB_URL=""          # --hub-url explicit override (= AGENT_HUB_URL に優先)
 EDITION=""          # used for self-host (community | private)
 DRY_RUN="no"
 SKIP_DOCKER_PULL="no"
@@ -77,6 +79,9 @@ OPTIONS:
   --roles-repo <owner/name>  Tier 2 で使う private fork repo (= --tier 2 必須)
   --hub-mode <public|self-host>  Hub server location
                              default: public (= agent-hub-ki.fly.dev)
+  --hub-url <url>            Hub MCP endpoint URL を直接指定 (= --hub-mode default を上書き)
+                             default: hub-mode から自動決定
+                             (public: https://agent-hub-ki.fly.dev/mcp / self-host: http://localhost:3000/mcp)
   --edition <community|private>  Self-host edition (= --hub-mode self-host のみ)
   --dry-run                  実行内容のみ print、 副作用なし (= debug 用)
   --skip-docker-pull         Docker image pull を skip (= 開発 / 既 pull 済 path)
@@ -133,6 +138,11 @@ parse_args() {
         HUB_MODE="$2"
         shift 2
         ;;
+      --hub-url)
+        [[ $# -ge 2 ]] || die "--hub-url requires an argument"
+        HUB_URL="$2"
+        shift 2
+        ;;
       --edition)
         [[ $# -ge 2 ]] || die "--edition requires an argument (community|private)"
         EDITION="$2"
@@ -164,6 +174,33 @@ parse_args() {
   if [[ -z "${USER_HANDLE}" ]]; then
     USER_HANDLE="${USER:-bot}"
   fi
+}
+
+# ============================================================
+# Hub URL resolution (issue #20)
+# ============================================================
+
+resolve_hub_url() {
+  # AGENT_HUB_URL の決定優先順位 (= --hub-mode semantics を尊重):
+  #   1. --hub-url フラグ     — 最優先、明示指定
+  #   2. caller env の AGENT_HUB_URL — installer 起動前に export 済みなら honor
+  #   3. --hub-mode self-host — localhost:3000/mcp を default
+  #   4. --hub-mode public    — fly.dev (= AGENT_HUB_URL_DEFAULT)
+  #
+  # これにより `--hub-mode self-host` 時に fly.dev が書かれる silent failure (issue #20) を修正。
+  if [[ -n "${HUB_URL}" ]]; then
+    AGENT_HUB_URL="${HUB_URL}"
+    info "Hub URL: ${AGENT_HUB_URL} (from --hub-url)"
+  elif [[ -n "${AGENT_HUB_URL:-}" ]]; then
+    info "Hub URL: ${AGENT_HUB_URL} (from caller env)"
+  elif [[ "${HUB_MODE}" == "self-host" ]]; then
+    AGENT_HUB_URL="${AGENT_HUB_URL_SELFHOST_DEFAULT}"
+    info "Hub URL: ${AGENT_HUB_URL} (self-host default)"
+  else
+    AGENT_HUB_URL="${AGENT_HUB_URL_DEFAULT}"
+    info "Hub URL: ${AGENT_HUB_URL} (public default)"
+  fi
+  export AGENT_HUB_URL
 }
 
 # ============================================================
@@ -363,12 +400,14 @@ write_env_file() {
   fi
   info "Writing env file to ${env_file}..."
   if [[ "${DRY_RUN}" == "yes" ]]; then
-    c_dim "[dry-run] would write ${env_file} (AGENT_HUB_URL, AGENT_HUB_TENANT)"
+    c_dim "[dry-run] would write ${env_file} (AGENT_HUB_URL=${AGENT_HUB_URL}, AGENT_HUB_TENANT=${USER_HANDLE})"
     return
   fi
+  # AGENT_HUB_URL は resolve_hub_url() で --hub-url / caller env / --hub-mode から確定済み (issue #20)。
+  # AGENT_HUB_TENANT は --user 指定 handle を正本とする (USER_HANDLE は parse_args() で $USER fallback 済)。
   cat > "${env_file}" <<EOF
-AGENT_HUB_URL=${AGENT_HUB_URL_DEFAULT}
-AGENT_HUB_TENANT=${USER:-${USER_HANDLE}}
+AGENT_HUB_URL=${AGENT_HUB_URL}
+AGENT_HUB_TENANT=${USER_HANDLE}
 EOF
   chmod 600 "${env_file}"
   ok "Env file written (${env_file}) ✅"
@@ -503,8 +542,9 @@ print_ce_admin_setup_guide() {
 main() {
   echo "agent-hub installer v${INSTALLER_VERSION}"
   parse_args "$@"
+  resolve_hub_url     # --hub-url / caller env / --hub-mode から AGENT_HUB_URL を確定 (issue #20)
 
-  info "Args: tier=${TIER}, user=${USER_HANDLE}, hub-mode=${HUB_MODE}, roles-repo=${ROLES_REPO:-(none)}, dry-run=${DRY_RUN}"
+  info "Args: tier=${TIER}, user=${USER_HANDLE}, hub-mode=${HUB_MODE}, hub-url=${AGENT_HUB_URL}, roles-repo=${ROLES_REPO:-(none)}, dry-run=${DRY_RUN}"
 
   check_prereqs
   install_uv_python     # uv で Python 3.12 を確保 (issue #18)
