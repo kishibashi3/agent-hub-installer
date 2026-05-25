@@ -81,16 +81,48 @@ curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -
 
 > ℹ️ `--hub-mode public` (default) では agent-hub-ki.fly.dev に接続するため **Docker image pull / 起動は行われません** (= Docker 未 install でも実行可能)。 self-host で local hub server を立てたい場合のみ `--hub-mode self-host` + Docker 必須。
 
-### Step 4: 動作確認
+### Step 4: bridge 接続を確認
 
-1. Claude Code を起動
-2. 送信 (= `@<your-handle>` は step 3 で設定した handle、 default は `$USER`):
+```bash
+tail -20 ~/.agent-hub/logs/bridge.log
+```
 
-   ```
-   @mybot hello
-   ```
+`registered` または `connected` が見えれば OK。見えない場合は `GITHUB_PAT` が正しく export されているか確認してから bridge を再起動してください:
 
-3. bot から返事が来ればセットアップ完了 ✅
+```bash
+pkill -f "agent-hub-bridge-claude.*--user.*mybot"
+export GITHUB_PAT=$(gh auth token)   # gh なし? → https://github.com/settings/tokens (scope: read:user)
+source ~/.agent-hub/env.sh
+nohup agent-hub-bridge-claude --user mybot >> ~/.agent-hub/logs/bridge.log 2>&1 &
+```
+
+### Step 5: Claude Code を起動して plugin を確認
+
+```bash
+source ~/.agent-hub/env.sh
+claude
+```
+
+Claude Code 内で:
+```
+/mcp
+```
+
+一覧に `agent-hub` が見えれば OK。見えない場合:
+```
+/plugin marketplace add https://github.com/kishibashi3/agent-hub-plugins-claude
+/plugin install agent-hub-plugin
+```
+
+その後 Claude Code を再起動し、`/mcp` で `agent-hub` が見えることを確認してください。
+
+### Step 6: 初回メッセージ
+
+```
+@mybot hello
+```
+
+bot から返信が来ればセットアップ完了 ✅
 
 ### 試して終わったら
 
