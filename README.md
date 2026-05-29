@@ -91,13 +91,13 @@ curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -
 tail -20 ~/.agent-hub/logs/bridge.log
 ```
 
-`registered` または `connected` が見えれば OK。見えない場合は `GITHUB_PAT` が正しく export されているか確認してから bridge を再起動してください:
+`registered` または `connected` が見えれば OK。見えない場合は `GITHUB_PAT` が正しく export されているか確認してから bridge を再起動してください (`<your-handle>` は `--user` で指定した handle に置き換えてください):
 
 ```bash
-pkill -f "agent-hub-bridge-claude.*--user.*mybot"
+pkill -f "agent-hub-bridge-claude.*--user.*<your-handle>"
 export GITHUB_PAT=$(gh auth token)   # gh なし? → https://github.com/settings/tokens (scope: read:user)
 source ~/.agent-hub/env.sh
-nohup agent-hub-bridge-claude --user mybot >> ~/.agent-hub/logs/bridge.log 2>&1 &
+nohup agent-hub-bridge-claude --user <your-handle> >> ~/.agent-hub/logs/bridge.log 2>&1 &
 ```
 
 ### Step 5: Claude Code を起動して plugin を確認
@@ -239,6 +239,8 @@ docker-compose up -d
 docker-compose ps                      # STATUS: healthy になるまで待つ
 curl http://localhost:3000/health      # {"status":"ok"} が返れば OK
 ```
+
+> ℹ️ dashboard (ポート 8080) も合わせて起動します。不要な場合は `docker-compose.yml` の `dashboard:` セクションをコメントアウトしてください。
 
 ### Step 3: bridge を self-host mode で起動
 

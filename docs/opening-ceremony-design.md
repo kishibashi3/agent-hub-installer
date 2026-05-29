@@ -153,7 +153,7 @@ nohup agent-hub-bridge-claude --user <handle> \
                source ~/.agent-hub/env.sh && \
                nohup agent-hub-bridge-claude --user mybot \
                  >> ~/.agent-hub/logs/bridge.log 2>&1 &
-  Full guide : https://github.com/kishibashi3/agent-hub-installer/blob/main/SETUP.md
+  Full guide : https://github.com/kishibashi3/agent-hub-installer/blob/main/README.md
 ```
 
 **変更点**:
@@ -180,6 +180,8 @@ installer: Claude Code を起動します? [Y/n] → y
 ---
 
 ## 6. SETUP.md 更新案
+
+> **実装済み (obsolete)**: この §6 の提案は PR #29 で実装完了。SETUP.md は削除され、内容は README.md に統合された。以下はアーカイブとして残す。
 
 SETUP.md の「Step 4: 動作確認」を以下に更新:
 
