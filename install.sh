@@ -545,7 +545,7 @@ print_summary() {
   echo "               source ~/.agent-hub/env.sh"
   echo "               nohup agent-hub-bridge-claude --user ${USER_HANDLE} \\"
   echo "                 >> ~/.agent-hub/logs/bridge.log 2>&1 &"
-  c_dim "  Full guide : https://github.com/kishibashi3/agent-hub-installer/blob/main/SETUP.md"
+  c_dim "  Full guide : https://github.com/kishibashi3/agent-hub-installer/blob/main/README.md"
   echo
   if [[ "${TIER}" == "1" ]]; then
     c_dim "  ─── Tier 2 へのステップアップ (= 本番運用・team 共有) ──────"

@@ -12,7 +12,7 @@
 #
 # Refs:
 #   - kishibashi3/agent-hub-installer issue #6
-#   - SETUP.md Phase 3 (Self-host) セクション
+#   - README.md (self-host セクション)
 
 version: "3.8"
 
