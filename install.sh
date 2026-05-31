@@ -421,14 +421,21 @@ write_env_sh() {
   # env.sh を source してから claude を起動することで env propagation を installer が担う。
   # GITHUB_PAT は secret hygiene のため書かない (caller env / gh auth token で取得)。
   # 既存の env.sh は上書きしない (= .env と同じ idempotent 方針)。
+  # 書き込む変数: AGENT_HUB_URL, AGENT_HUB_TENANT, AGENT_HUB_USER, AGENT_HUB_ROLES (issue #33)
   local env_sh="${AGENT_HUB_DIR}/env.sh"
   if [[ -f "${env_sh}" ]]; then
     info "env.sh exists at ${env_sh}, preserving"
     return
   fi
   info "Writing env.sh to ${env_sh}..."
+  local roles_path
+  if [[ "${TIER}" == "2" ]]; then
+    roles_path="${AGENT_HUB_DIR}/roles-repo"
+  else
+    roles_path="${AGENT_HUB_DIR}/roles"
+  fi
   if [[ "${DRY_RUN}" == "yes" ]]; then
-    c_dim "[dry-run] would write ${env_sh} (AGENT_HUB_URL=${AGENT_HUB_URL}, AGENT_HUB_TENANT=${USER_HANDLE})"
+    c_dim "[dry-run] would write ${env_sh} (AGENT_HUB_URL=${AGENT_HUB_URL}, AGENT_HUB_TENANT=${USER_HANDLE}, AGENT_HUB_USER=${USER_HANDLE}, AGENT_HUB_ROLES=${roles_path})"
     return
   fi
   # Critical (issue #22 review): コメント行に $(gh auth token) があるため、
@@ -443,8 +450,8 @@ write_env_sh() {
 #   claude
 # GITHUB_PAT はここには書かない (secret hygiene)。
 EOF
-  printf 'export AGENT_HUB_URL="%s"\nexport AGENT_HUB_TENANT="%s"\n' \
-    "${AGENT_HUB_URL}" "${USER_HANDLE}" >> "${env_sh}"
+  printf 'export AGENT_HUB_URL="%s"\nexport AGENT_HUB_TENANT="%s"\nexport AGENT_HUB_USER="%s"\nexport AGENT_HUB_ROLES="%s"\n' \
+    "${AGENT_HUB_URL}" "${USER_HANDLE}" "${USER_HANDLE}" "${roles_path}" >> "${env_sh}"
   chmod 600 "${env_sh}"
   ok "env.sh written (${env_sh}) ✅"
 }
