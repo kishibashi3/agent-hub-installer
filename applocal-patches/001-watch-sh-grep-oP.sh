@@ -47,7 +47,7 @@ NEW = "sed -nE 's/.*\"login\"[[:space:]]*:[[:space:]]*\"([^\"]+)\".*/\\1/p' | he
 
 if OLD not in content:
     # Try alternate quoting style
-    OLD2 = 'grep -oP \'"login":\\s*"\\K[^"]+ \''
+    OLD2 = 'grep -oP \'"login":\\s*"\\K[^"]+\''
     if OLD2 not in content:
         print("[skip] grep -oP pattern not found in expected form")
         sys.exit(0)

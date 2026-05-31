@@ -813,13 +813,18 @@ apply_applocal_patches() {
     (( _skipped++ )) || true
   elif [[ "${DRY_RUN}" == "yes" ]]; then
     c_dim "  [dry-run] patch-001: would patch ${_watch_sh} (grep -oP → sed)"
+    (( _skipped++ )) || true
   else
     # Write Python patcher to temp file (avoids shell quoting hell with grep -oP pattern)
     local _py
     _py=$(mktemp /tmp/agent-hub-patch001-XXXXXX.py 2>/dev/null || echo "/tmp/agent-hub-patch001-$$.py")
+    trap 'rm -f "${_py}"' EXIT
     cat > "${_py}" << 'PYTHON_EOF'
 import sys, os
 fname = os.environ.get('PATCH_FILE', '')
+if not fname:
+    print("[err] PATCH_FILE not set", file=sys.stderr)
+    sys.exit(1)
 with open(fname) as f:
     content = f.read()
 OLD = "grep -oP '\"login\":\\s*\"\\K[^\"]+'"
@@ -833,7 +838,6 @@ print(f"patched: {fname}")
 PYTHON_EOF
     local _patch_result
     _patch_result=$(PATCH_FILE="${_watch_sh}" python3 "${_py}" 2>&1 || true)
-    rm -f "${_py}"
     if [[ "${_patch_result}" == patched* ]]; then
       ok "  patch-001: ${_watch_sh} patched (grep -oP → sed) ✅"
       (( _applied++ )) || true
