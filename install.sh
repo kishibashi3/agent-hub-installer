@@ -456,6 +456,47 @@ EOF
   ok "env.sh written (${env_sh}) ✅"
 }
 
+write_shell_rc() {
+  # issue #35: shell rc に `source ~/.agent-hub/env.sh` を自動追記する。
+  # これにより env.sh が環境変数の single source of truth となり、
+  # shell rc と env.sh の二重管理・競合を防ぐ。
+  # 既に source 行が存在する場合は追記しない (= idempotent)。
+  local rc_file
+  case "${SHELL:-}" in
+    */zsh)  rc_file="${HOME}/.zshrc" ;;
+    */bash) rc_file="${HOME}/.bashrc" ;;
+    *)
+      warn "Unknown shell: ${SHELL:-unset}. Skipping shell rc update."
+      warn "  → Manually add to your rc file: source ~/.agent-hub/env.sh"
+      return 0
+      ;;
+  esac
+
+  local source_line='source ~/.agent-hub/env.sh'
+
+  # 既に source 行が存在するか確認 (idempotent)
+  if [[ -f "${rc_file}" ]] && grep -qF "${source_line}" "${rc_file}"; then
+    info "${rc_file} already contains source line, skipping"
+    return 0
+  fi
+
+  info "Appending source line to ${rc_file}..."
+  if [[ "${DRY_RUN}" == "yes" ]]; then
+    c_dim "[dry-run] would append to ${rc_file}:"
+    c_dim "  # agent-hub env (added by agent-hub installer)"
+    c_dim "  source ~/.agent-hub/env.sh"
+    return 0
+  fi
+
+  cat >> "${rc_file}" <<'EOF'
+
+# agent-hub env (added by agent-hub installer)
+source ~/.agent-hub/env.sh
+EOF
+  ok "Appended source line to ${rc_file} ✅"
+  info "Run: source ${rc_file}"
+}
+
 start_bridge() {
   info "Starting bridge worker in background (logs: ${AGENT_HUB_DIR}/logs/bridge.log)..."
   if [[ "${DRY_RUN}" == "yes" ]]; then
@@ -529,10 +570,10 @@ print_summary() {
   echo "    export GITHUB_PAT=\$(gh auth token)"
   c_dim "    # gh なし? → https://github.com/settings/tokens (scope: read:user)"
   echo
-  echo "  [2/4] env を load して bridge を確認:"
-  echo "    source ~/.agent-hub/env.sh"
+  echo "  [2/4] 新しい terminal を開く (または: source <rcfile> で即時反映) + bridge を確認:"
   echo "    tail -5 ~/.agent-hub/logs/bridge.log"
   c_dim "    # \"registered\" が見えれば OK"
+  c_dim "    # env.sh は自動で shell rc に追記済み — 手動 source 不要"
   echo
   echo "  [3/4] Claude Code を起動 + plugin を確認:"
   echo "    claude"
@@ -628,6 +669,7 @@ main() {
   clone_roles_repo   # Tier 2 のみ: private fork clone
   write_env_file     # AGENT_HUB_URL / AGENT_HUB_TENANT を .env に書く
   write_env_sh       # Claude Code 起動用 env.sh を生成 (issue #22)
+  write_shell_rc     # shell rc に source ~/.agent-hub/env.sh を追記 (issue #35)
 
   start_bridge
   print_summary
