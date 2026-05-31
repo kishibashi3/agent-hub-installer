@@ -462,6 +462,7 @@ write_shell_rc() {
   # shell rc と env.sh の二重管理・競合を防ぐ。
   # 既に source 行が存在する場合は追記しない (= idempotent)。
   local rc_file
+  # SHELL 未設定時は "" -> *) ブランチ (warn + skip) — functional fallback ではなく null-guard
   case "${SHELL:-}" in
     */zsh)  rc_file="${HOME}/.zshrc" ;;
     */bash) rc_file="${HOME}/.bashrc" ;;
@@ -472,7 +473,8 @@ write_shell_rc() {
       ;;
   esac
 
-  local source_line='source ~/.agent-hub/env.sh'
+  # double-quoted so ${AGENT_HUB_DIR} expands to actual path (supports custom AGENT_HUB_DIR)
+  local source_line="source ${AGENT_HUB_DIR}/env.sh"
 
   # 既に source 行が存在するか確認 (idempotent)
   if [[ -f "${rc_file}" ]] && grep -qF "${source_line}" "${rc_file}"; then
@@ -484,15 +486,20 @@ write_shell_rc() {
   if [[ "${DRY_RUN}" == "yes" ]]; then
     c_dim "[dry-run] would append to ${rc_file}:"
     c_dim "  # agent-hub env (added by agent-hub installer)"
-    c_dim "  source ~/.agent-hub/env.sh"
+    c_dim "  ${source_line}"
     return 0
   fi
 
-  cat >> "${rc_file}" <<'EOF'
+  local _rc_existed="yes"
+  [[ -f "${rc_file}" ]] || _rc_existed="no"
+
+  # Unquoted heredoc: ${AGENT_HUB_DIR} expands to actual path at write time.
+  cat >> "${rc_file}" <<EOF
 
 # agent-hub env (added by agent-hub installer)
-source ~/.agent-hub/env.sh
+${source_line}
 EOF
+  [[ "${_rc_existed}" == "no" ]] && info "Created ${rc_file} (new file)"
   ok "Appended source line to ${rc_file} ✅"
   info "Run: source ${rc_file}"
 }
@@ -570,7 +577,7 @@ print_summary() {
   echo "    export GITHUB_PAT=\$(gh auth token)"
   c_dim "    # gh なし? → https://github.com/settings/tokens (scope: read:user)"
   echo
-  echo "  [2/4] 新しい terminal を開く (または: source <rcfile> で即時反映) + bridge を確認:"
+  echo "  [2/4] 新しい terminal を開く (または即時反映: source ~/.bashrc  /  source ~/.zshrc) + bridge を確認:"
   echo "    tail -5 ~/.agent-hub/logs/bridge.log"
   c_dim "    # \"registered\" が見えれば OK"
   c_dim "    # env.sh は自動で shell rc に追記済み — 手動 source 不要"
@@ -590,7 +597,7 @@ print_summary() {
   echo "  Bridge PID : pgrep -f agent-hub-bridge-claude"
   echo "  Restart    : export GITHUB_PAT=\$(gh auth token)  # gh なし? → 手動で export"
   echo "               pkill -f \"agent-hub-bridge-claude.*--user.*${USER_HANDLE}\" || true"
-  echo "               source ~/.agent-hub/env.sh"
+  echo "               source ${AGENT_HUB_DIR}/env.sh"
   echo "               nohup agent-hub-bridge-claude --user ${USER_HANDLE} \\"
   echo "                 >> ~/.agent-hub/logs/bridge.log 2>&1 &"
   c_dim "  Full guide : https://github.com/kishibashi3/agent-hub-installer/blob/main/README.md"
