@@ -74,7 +74,8 @@ USAGE:
 
 SUBCOMMANDS:
   doctor                     health-check: PAT / hub / port / sed / grep / bash / env / plugin / zombie
-  generate-env               env.sh が未生成の環境向け: ~/.agent-hub/env.sh を生成し shell rc に source 行を追記
+  generate-env               env.sh が未生成の環境向け: ~/.agent-hub/env.sh を生成する
+                             ~/.bashrc (bash) または ~/.zshrc (zsh) に source 行を自動追記する
                              (既存インストール環境 / 手動セットアップ環境で使用)
                              example: install.sh generate-env --user mybot --hub-url https://...
 
@@ -641,7 +642,6 @@ generate_env_cmd() {
   c_bold "agent-hub generate-env — env.sh 生成"
   echo
   check_user_handle "${USER_HANDLE}"
-  info "Args: user=${USER_HANDLE}, hub-url=${AGENT_HUB_URL:-auto}, tier=${TIER}, dry-run=${DRY_RUN}"
 
   # AGENT_HUB_DIR を作成 (未作成の場合)
   if [[ "${DRY_RUN}" == "yes" ]]; then
@@ -651,6 +651,8 @@ generate_env_cmd() {
   fi
 
   resolve_hub_url
+  # resolve_hub_url() 実行後に log — hub-url が確定した値を表示するため (minor: was before resolve)
+  info "Args: user=${USER_HANDLE}, hub-url=${AGENT_HUB_URL}, tier=${TIER}, dry-run=${DRY_RUN}"
   write_env_sh
   write_shell_rc
 
