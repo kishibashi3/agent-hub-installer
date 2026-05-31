@@ -36,6 +36,7 @@ HUB_URL=""          # --hub-url explicit override (= AGENT_HUB_URL に優先)
 EDITION=""          # used for self-host (community | private)
 DRY_RUN="no"
 SKIP_DOCKER_PULL="no"
+SUBCOMMAND=""
 
 # ============================================================
 # UI helpers
@@ -69,6 +70,9 @@ agent-hub installer — 2-stage bootstrap
 USAGE:
   curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash
   curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -s -- [OPTIONS]
+
+SUBCOMMANDS:
+  doctor                     health-check: PAT / hub / port / sed / grep / bash / env / plugin / zombie
 
 OPTIONS:
   --user <handle>            Bridge bot handle name (= agent-hub の @handle)
@@ -117,6 +121,10 @@ EOF
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      doctor)
+        SUBCOMMAND="doctor"
+        shift
+        ;;
       --user)
         [[ $# -ge 2 ]] || die "--user requires an argument"
         USER_HANDLE="$2"
@@ -505,6 +513,197 @@ start_bridge() {
 }
 
 # ============================================================
+# doctor subcommand (issue #37) — health-check
+# ============================================================
+
+doctor_cmd() {
+  echo
+  c_bold "agent-hub doctor — health-check"
+  echo
+
+  local _pass=0 _warn=0 _fail=0
+
+  # Source env files to pick up AGENT_HUB_URL / GITHUB_PAT etc.
+  # shellcheck source=/dev/null
+  [[ -f "${HOME}/.agent-hub/env.sh" ]] && source "${HOME}/.agent-hub/env.sh" || true
+  if [[ -f "${HOME}/.agent-hub/.env" ]]; then
+    # shellcheck source=/dev/null
+    set -a; source "${HOME}/.agent-hub/.env"; set +a
+  fi
+
+  # ── Check 1: PAT validity ────────────────────────────────────
+  local _pat="${GITHUB_PAT:-}"
+  if [[ -z "${_pat}" ]] && command -v gh >/dev/null 2>&1; then
+    _pat=$(gh auth token 2>/dev/null || true)
+  fi
+  if [[ -z "${_pat}" ]]; then
+    err "[fail]  PAT validity — GITHUB_PAT not set and gh auth token unavailable"
+    (( _fail++ )) || true
+  elif curl -sf -H "Authorization: Bearer ${_pat}" https://api.github.com/user 2>/dev/null | grep -q '"login"'; then
+    ok "PAT validity — GitHub API returned 200"
+    (( _pass++ )) || true
+  else
+    err "[fail]  PAT validity — GitHub API did not return valid user (token expired?)"
+    (( _fail++ )) || true
+  fi
+
+  # ── Check 2: Hub reachability ────────────────────────────────
+  local _hub_url="${AGENT_HUB_URL:-}"
+  local _hub_alive="yes"
+  if [[ -z "${_hub_url}" ]]; then
+    warn "[warn]  Hub reachability — AGENT_HUB_URL not set (source ~/.agent-hub/env.sh?), skipping"
+    (( _warn++ )) || true
+    _hub_alive="no"
+  else
+    # Strip /mcp suffix to get base URL, then append /health
+    local _hub_base="${_hub_url%/mcp}"
+    _hub_base="${_hub_base%/}"
+    local _health_url="${_hub_base}/health"
+    if curl -sf --max-time 10 "${_health_url}" >/dev/null 2>&1; then
+      ok "Hub reachability — ${_health_url} responded"
+      (( _pass++ )) || true
+    else
+      err "[fail]  Hub reachability — ${_health_url} did not respond (hub down?)"
+      (( _fail++ )) || true
+      _hub_alive="no"
+    fi
+  fi
+
+  # ── Check 3: Port conflict ────────────────────────────────────
+  # Extract port from hub URL (default 3000)
+  local _port
+  _port=$(printf '%s' "${_hub_url}" | grep -oE ':[0-9]+/' | grep -oE '[0-9]+' | head -1 || true)
+  if [[ -z "${_port}" ]]; then
+    _port=$(printf '%s' "${_hub_url}" | grep -oE ':[0-9]+$' | grep -oE '[0-9]+' | head -1 || true)
+  fi
+  [[ -z "${_port}" ]] && _port="3000"
+  local _port_user=""
+  local _port_tool=""
+  if command -v lsof >/dev/null 2>&1; then
+    _port_tool="lsof"
+    _port_user=$(lsof -ti:"${_port}" 2>/dev/null | head -1 || true)
+  elif command -v ss >/dev/null 2>&1; then
+    _port_tool="ss"
+    _port_user=$(ss -ltn 2>/dev/null | grep -E ":${_port}[^0-9]" | head -1 || true)
+  fi
+  if [[ -z "${_port_tool}" ]]; then
+    warn "[warn]  Port conflict — neither lsof nor ss available, cannot check port ${_port}"
+    (( _warn++ )) || true
+  elif [[ -n "${_port_user}" ]]; then
+    if [[ "${_port_tool}" == "lsof" ]]; then
+      warn "[warn]  Port conflict — port ${_port} is in use by PID ${_port_user}. Hub may conflict."
+    else
+      warn "[warn]  Port conflict — port ${_port} is in use (ss: ${_port_user}). Hub may conflict."
+    fi
+    (( _warn++ )) || true
+  else
+    ok "Port conflict — port ${_port} is free"
+    (( _pass++ )) || true
+  fi
+
+  # ── Check 4: sed compatibility ────────────────────────────────
+  local _sed_test
+  _sed_test=$(mktemp 2>/dev/null || echo "/tmp/agent-hub-doctor-sed-$$")
+  printf 'test' > "${_sed_test}"
+  if sed -i '' 's/test/ok/' "${_sed_test}" 2>/dev/null; then
+    ok "sed compatibility — BSD sed (-i '' syntax) works"
+    (( _pass++ )) || true
+  else
+    warn "[warn]  sed compatibility — BSD sed not available (GNU sed detected); -i '' will fail on this system"
+    (( _warn++ )) || true
+  fi
+  rm -f "${_sed_test}"
+
+  # ── Check 5: grep compatibility ───────────────────────────────
+  if echo test | grep -P 'test' >/dev/null 2>&1; then
+    ok "grep compatibility — grep -P (PCRE) is supported"
+    (( _pass++ )) || true
+  else
+    warn "[warn]  grep compatibility — grep -P unavailable (BSD grep); use -E instead of -P"
+    (( _warn++ )) || true
+  fi
+
+  # ── Check 6: bash version ─────────────────────────────────────
+  local _bash_ver
+  _bash_ver=$(bash --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "0.0")
+  local _bash_major
+  _bash_major=$(printf '%s' "${_bash_ver}" | cut -d. -f1)
+  if [[ "${_bash_major}" -lt 4 ]]; then
+    warn "[warn]  bash version — bash ${_bash_ver} detected (macOS default is 3.2). \${var^^} case conversion and associative arrays unavailable."
+    (( _warn++ )) || true
+  else
+    ok "bash version — bash ${_bash_ver} (>= 4.x)"
+    (( _pass++ )) || true
+  fi
+
+  # ── Check 7: env completeness ─────────────────────────────────
+  local _env_missing=()
+  [[ -z "${AGENT_HUB_URL:-}" ]]    && _env_missing+=("AGENT_HUB_URL")
+  [[ -z "${AGENT_HUB_USER:-}" ]]   && _env_missing+=("AGENT_HUB_USER")
+  [[ -z "${AGENT_HUB_ROLES:-}" ]]  && _env_missing+=("AGENT_HUB_ROLES")
+  [[ -z "${AGENT_HUB_TENANT:-}" ]] && _env_missing+=("AGENT_HUB_TENANT")
+  if [[ ${#_env_missing[@]} -eq 0 ]]; then
+    ok "env completeness — AGENT_HUB_URL / USER / ROLES / TENANT all set"
+    (( _pass++ )) || true
+  else
+    warn "[warn]  env completeness — missing: ${_env_missing[*]} (source ~/.agent-hub/env.sh?)"
+    (( _warn++ )) || true
+  fi
+
+  # ── Check 8: plugin patch status ──────────────────────────────
+  local _watch_sh
+  _watch_sh=$(find "${HOME}/.claude" -name watch.sh 2>/dev/null | head -1 || true)
+  if [[ -z "${_watch_sh}" ]]; then
+    ok "plugin patch status — watch.sh not found (agent-hub plugin not installed, skip)"
+    (( _pass++ )) || true
+  else
+    if grep -q 'grep -oP' "${_watch_sh}" 2>/dev/null; then
+      warn "[warn]  plugin patch status — ${_watch_sh} contains 'grep -oP' (BSD grep incompatible; patch needed)"
+      (( _warn++ )) || true
+    else
+      ok "plugin patch status — watch.sh found, no grep -oP detected"
+      (( _pass++ )) || true
+    fi
+  fi
+
+  # ── Check 9: bridge zombie detection ──────────────────────────
+  # If hub is unreachable, check whether bridge processes are still running
+  if [[ "${_hub_alive}" == "no" ]]; then
+    local _zombie_pids=""
+    if command -v pgrep >/dev/null 2>&1; then
+      _zombie_pids=$(pgrep -f agent-hub-bridge 2>/dev/null | tr '\n' ' ' || true)
+    fi
+    if [[ -n "${_zombie_pids}" ]]; then
+      warn "[warn]  bridge zombie detection — hub unreachable but bridge PIDs running: ${_zombie_pids}(zombie; kill and respawn after hub recovers)"
+      (( _warn++ )) || true
+    else
+      ok "bridge zombie detection — hub unreachable but no bridge processes found"
+      (( _pass++ )) || true
+    fi
+  else
+    ok "bridge zombie detection — hub is reachable, no zombie check needed"
+    (( _pass++ )) || true
+  fi
+
+  # ── Summary ───────────────────────────────────────────────────
+  echo
+  c_bold "─── doctor summary ──────────────────────────────────────────"
+  echo "  passed: ${_pass}   warned: ${_warn}   failed: ${_fail}"
+  echo
+
+  if [[ "${_fail}" -gt 0 ]]; then
+    c_red  "  Some checks FAILED. Fix the issues above before running bridges."
+    return 1
+  elif [[ "${_warn}" -gt 0 ]]; then
+    c_yellow "  All critical checks passed, but warnings need attention."
+    return 0
+  else
+    c_green "  All checks passed."
+    return 0
+  fi
+}
+
+# ============================================================
 # Final summary
 # ============================================================
 
@@ -613,6 +812,12 @@ print_ce_admin_setup_guide() {
 main() {
   echo "agent-hub installer v${INSTALLER_VERSION}"
   parse_args "$@"
+
+  if [[ "${SUBCOMMAND}" == "doctor" ]]; then
+    doctor_cmd || exit 1
+    exit 0
+  fi
+
   resolve_hub_url     # --hub-url / caller env / --hub-mode から AGENT_HUB_URL を確定 (issue #20)
 
   info "Args: tier=${TIER}, user=${USER_HANDLE}, hub-mode=${HUB_MODE}, hub-url=${AGENT_HUB_URL}, roles-repo=${ROLES_REPO:-(none)}, dry-run=${DRY_RUN}"
