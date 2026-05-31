@@ -793,6 +793,63 @@ SERVICE_EOF
   esac
 }
 
+apply_applocal_patches() {
+  # Apply applocal patches to plugin cache files (issue #34).
+  # Patches live in applocal-patches/ in the installer repo and are embedded inline here
+  # for single-file curl|bash installer compatibility.
+  # Each patch is idempotent: no-op if already applied or target not installed.
+  info "Applying applocal patches..."
+  local _applied=0 _skipped=0
+
+  # === Patch 001: watch.sh grep -oP → sed (BSD grep 互換) ===
+  # watch.sh の grep -oP は macOS BSD grep で動かない。POSIX sed に置換 (issue #31 障壁 #1)
+  local _watch_sh
+  _watch_sh=$(find "${HOME}/.claude" -name watch.sh 2>/dev/null | head -1 || true)
+  if [[ -z "${_watch_sh}" ]]; then
+    info "  patch-001: watch.sh not found (plugin not installed yet) — skip"
+    (( _skipped++ )) || true
+  elif ! grep -q 'grep -oP' "${_watch_sh}" 2>/dev/null; then
+    info "  patch-001: watch.sh already patched — skip"
+    (( _skipped++ )) || true
+  elif [[ "${DRY_RUN}" == "yes" ]]; then
+    c_dim "  [dry-run] patch-001: would patch ${_watch_sh} (grep -oP → sed)"
+  else
+    # Write Python patcher to temp file (avoids shell quoting hell with grep -oP pattern)
+    local _py
+    _py=$(mktemp /tmp/agent-hub-patch001-XXXXXX.py 2>/dev/null || echo "/tmp/agent-hub-patch001-$$.py")
+    cat > "${_py}" << 'PYTHON_EOF'
+import sys, os
+fname = os.environ.get('PATCH_FILE', '')
+with open(fname) as f:
+    content = f.read()
+OLD = "grep -oP '\"login\":\\s*\"\\K[^\"]+'"
+NEW = "sed -nE 's/.*\"login\"[[:space:]]*:[[:space:]]*\"([^\"]+)\".*/\\1/p' | head -1"
+if OLD not in content:
+    print("skip: pattern not found in expected form")
+    sys.exit(0)
+with open(fname, 'w') as f:
+    f.write(content.replace(OLD, NEW))
+print(f"patched: {fname}")
+PYTHON_EOF
+    local _patch_result
+    _patch_result=$(PATCH_FILE="${_watch_sh}" python3 "${_py}" 2>&1 || true)
+    rm -f "${_py}"
+    if [[ "${_patch_result}" == patched* ]]; then
+      ok "  patch-001: ${_watch_sh} patched (grep -oP → sed) ✅"
+      (( _applied++ )) || true
+    else
+      info "  patch-001: ${_patch_result}"
+      (( _skipped++ )) || true
+    fi
+  fi
+
+  if [[ "${_applied}" -gt 0 ]]; then
+    ok "applocal patches: ${_applied} applied, ${_skipped} skipped ✅"
+  else
+    info "applocal patches: ${_applied} applied, ${_skipped} skipped"
+  fi
+}
+
 start_bridge() {
   info "Starting bridge worker in background (logs: ${AGENT_HUB_DIR}/logs/bridge.log)..."
   if [[ "${DRY_RUN}" == "yes" ]]; then
@@ -987,10 +1044,11 @@ doctor_cmd() {
     (( _pass++ )) || true
   else
     if grep -q 'grep -oP' "${_watch_sh}" 2>/dev/null; then
-      warn "[warn]  plugin patch status — ${_watch_sh} contains 'grep -oP' (BSD grep incompatible; patch needed)"
+      warn "[warn]  plugin patch status — ${_watch_sh} contains 'grep -oP' (BSD grep incompatible)"
+      warn "         → 再実行で自動修正: bash install.sh"
       (( _warn++ )) || true
     else
-      ok "plugin patch status — watch.sh found, no grep -oP detected"
+      ok "plugin patch status — watch.sh found, grep -oP not detected (patch applied or not needed)"
       (( _pass++ )) || true
     fi
   fi
@@ -1190,6 +1248,7 @@ main() {
   write_env_file     # AGENT_HUB_URL / AGENT_HUB_TENANT を .env に書く
   write_env_sh       # Claude Code 起動用 env.sh を生成 (issue #22)
   write_shell_rc     # shell rc に source ~/.agent-hub/env.sh を追記 (issue #35)
+  apply_applocal_patches   # plugin cache patches (issue #34)
 
   # self-host のみ: docker-compose.yml + start-hub.sh + autostart unit を配置 (issue #36)
   write_compose_file
