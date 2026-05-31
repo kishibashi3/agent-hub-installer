@@ -215,14 +215,14 @@ probe_auth_mode() {
   # Probe the hub's /health endpoint to detect AUTH_MODE and guide user.
   # Graceful: no-op if hub is unreachable or response omits auth_mode field
   # (older server versions may not expose it — see kishibashi3/agent-hub for server-side PR).
-  local _base="${AGENT_HUB_URL%/mcp}"
-  _base="${_base%/}"
+  local _base="${AGENT_HUB_URL%/}"
+  _base="${_base%/mcp}"
   local _health="${_base}/health"
   local _response
   _response=$(curl -sf --max-time 5 "${_health}" 2>/dev/null || true)
   [[ -z "${_response}" ]] && return 0   # hub unreachable — skip silently
 
-  # Extract auth_mode from JSON. Try python3 first (always available after uv install),
+  # Extract auth_mode from JSON. Try python3 if available (uv may not have run yet),
   # fall back to sed (POSIX portable).
   local _auth_mode=""
   if command -v python3 >/dev/null 2>&1; then
@@ -913,7 +913,7 @@ main() {
   fi
 
   resolve_hub_url     # --hub-url / caller env / --hub-mode から AGENT_HUB_URL を確定 (issue #20)
-  probe_auth_mode     # hub AUTH_MODE を probe して必須 env を案内 (issue #32)
+  [[ "${DRY_RUN}" == "yes" ]] || probe_auth_mode     # hub AUTH_MODE を probe して必須 env を案内 (issue #32)
 
   info "Args: tier=${TIER}, user=${USER_HANDLE}, hub-mode=${HUB_MODE}, hub-url=${AGENT_HUB_URL}, roles-repo=${ROLES_REPO:-(none)}, dry-run=${DRY_RUN}"
 
