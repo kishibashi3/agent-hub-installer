@@ -74,6 +74,10 @@ USAGE:
 
 SUBCOMMANDS:
   doctor                     health-check: PAT / hub / port / sed / grep / bash / env / plugin / zombie
+  generate-env               env.sh が未生成の環境向け: ~/.agent-hub/env.sh を生成する
+                             ~/.bashrc (bash) または ~/.zshrc (zsh) に source 行を自動追記する
+                             (既存インストール環境 / 手動セットアップ環境で使用)
+                             example: install.sh generate-env --user mybot --hub-url https://...
 
 OPTIONS:
   --user <handle>            Bridge bot handle name (= agent-hub の @handle)
@@ -126,6 +130,10 @@ parse_args() {
     case "$1" in
       doctor)
         SUBCOMMAND="doctor"
+        shift
+        ;;
+      generate-env)
+        SUBCOMMAND="generate-env"
         shift
         ;;
       --user)
@@ -514,6 +522,7 @@ write_env_sh() {
   # 既存の env.sh は上書きしない (= .env と同じ idempotent 方針)。
   # 書き込む変数: AGENT_HUB_URL, AGENT_HUB_TENANT, AGENT_HUB_USER, AGENT_HUB_ROLES (issue #33),
   #              BRIDGE_LOG_DIR (agent-hub-roles#8)
+  # + コメントアウトスタブ: bridge BIN / モデル設定 / observability (issue #46)
   local env_sh="${AGENT_HUB_DIR}/env.sh"
   if [[ -f "${env_sh}" ]]; then
     info "env.sh exists at ${env_sh}, preserving"
@@ -527,7 +536,7 @@ write_env_sh() {
     roles_path="${AGENT_HUB_DIR}/roles"
   fi
   if [[ "${DRY_RUN}" == "yes" ]]; then
-    c_dim "[dry-run] would write ${env_sh} (AGENT_HUB_URL=${AGENT_HUB_URL}, AGENT_HUB_TENANT=${USER_HANDLE}, AGENT_HUB_USER=${USER_HANDLE}, AGENT_HUB_ROLES=${roles_path}, BRIDGE_LOG_DIR=\${BRIDGE_LOG_DIR:-\$HOME/.agent-hub/logs})"
+    c_dim "[dry-run] would write ${env_sh} (AGENT_HUB_URL=${AGENT_HUB_URL}, AGENT_HUB_TENANT=${USER_HANDLE}, AGENT_HUB_USER=${USER_HANDLE}, AGENT_HUB_ROLES=${roles_path}, BRIDGE_LOG_DIR=\${BRIDGE_LOG_DIR:-\$HOME/.agent-hub/logs}, +stubs: bridge BIN / model / telemetry)"
     return
   fi
   # Critical (issue #22 review): コメント行に $(gh auth token) があるため、
@@ -548,6 +557,25 @@ EOF
   # リテラルで書き込み、env.sh source 時に評価させる (= install 時の $HOME ではなく source 時の $HOME を使う)。
   cat >> "${env_sh}" <<'EOF'
 export BRIDGE_LOG_DIR="${BRIDGE_LOG_DIR:-$HOME/.agent-hub/logs}"
+
+# ── 拡張スタブ (issue #46) ── コメントアウト済み。必要な行を有効化して使用。 ──────────────
+
+# bridge BIN パス（未設定なら PATH から自動検索）
+# export AGENT_HUB_BRIDGE_CLAUDE_BIN=""
+# export AGENT_HUB_BRIDGE_CLAUDE_P_BIN=""
+# export AGENT_HUB_BRIDGE_CODEX_BIN=""
+# export AGENT_HUB_BRIDGE_GEMINI_BIN=""
+# export AGENT_HUB_BRIDGE_SLACK_BIN=""
+# export AGENT_HUB_BRIDGE_A2A_BIN=""
+# export AGENT_HUB_CLIENT_CODEX_BIN=""
+
+# モデル設定
+# export AGENT_HUB_BRIDGE_MODEL_HEAVY=""
+# export AGENT_HUB_BRIDGE_MODEL_MIDDLE=""
+# export AGENT_HUB_BRIDGE_MODEL_LIGHT=""
+
+# observability（オプション、設定すれば OTLP span が送られる）
+# export AGENT_HUB_TELEMETRY_URL=""
 EOF
   chmod 600 "${env_sh}"
   ok "env.sh written (${env_sh}) ✅"
@@ -599,6 +627,38 @@ EOF
   [[ "${_rc_existed}" == "no" ]] && info "Created ${rc_file} (new file)"
   ok "Appended source line to ${rc_file} ✅"
   info "Run: source ${rc_file}"
+}
+
+# ============================================================
+# generate-env subcommand (issue #46)
+# ============================================================
+
+generate_env_cmd() {
+  # generate-env サブコマンド: full install を伴わずに env.sh のみを生成する。
+  # 既存手動セットアップ環境や env.sh が未生成の環境向け。
+  # フル install パス (check_prereqs / docker / uv / gh 等) は実行しない。
+  # 既存 env.sh がある場合は idempotent (上書きせず終了)。
+  echo
+  c_bold "agent-hub generate-env — env.sh 生成"
+  echo
+  check_user_handle "${USER_HANDLE}"
+
+  # AGENT_HUB_DIR を作成 (未作成の場合)
+  if [[ "${DRY_RUN}" == "yes" ]]; then
+    c_dim "[dry-run] would create ${AGENT_HUB_DIR} if not exists"
+  else
+    mkdir -p "${AGENT_HUB_DIR}"
+  fi
+
+  resolve_hub_url
+  # resolve_hub_url() 実行後に log — hub-url が確定した値を表示するため (minor: was before resolve)
+  info "Args: user=${USER_HANDLE}, hub-url=${AGENT_HUB_URL}, tier=${TIER}, dry-run=${DRY_RUN}"
+  write_env_sh
+  write_shell_rc
+
+  echo
+  ok "generate-env 完了 ✅"
+  info "  次のステップ: source ${AGENT_HUB_DIR}/env.sh"
 }
 
 write_compose_file() {
@@ -1268,6 +1328,11 @@ main() {
 
   if [[ "${SUBCOMMAND}" == "doctor" ]]; then
     doctor_cmd || exit 1
+    exit 0
+  fi
+
+  if [[ "${SUBCOMMAND}" == "generate-env" ]]; then
+    generate_env_cmd   # env.sh のみを生成 (full install なし) — 既存手動環境向け (issue #46)
     exit 0
   fi
 
