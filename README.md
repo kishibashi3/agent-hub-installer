@@ -246,6 +246,19 @@ curl http://localhost:3000/health      # {"status":"ok"} が返れば OK
 
 > ℹ️ dashboard (ポート 8080) も合わせて起動します。不要な場合は `docker-compose.yml` の `dashboard:` セクションをコメントアウトしてください。
 
+### AUTH_MODE × client 認証方式
+
+server `.env` の `AUTH_MODE` (= `AGENT_HUB_EDITION` ではなく server 起動時に設定される認証モード) によって、bridge / Claude Code に必要な認証手段が変わります。
+
+| Server `AUTH_MODE` | 用途 | Bridge 必須 env | Claude Code 必須 env |
+|---|---|---|---|
+| `pat` **(default)** | インターネット公開 / multi-tenant | `GITHUB_PAT=ghp_...` (scope: `read:user`) | `GITHUB_PAT` を export |
+| `trust` | localhost 専用 / LAN 内テスト | 不要 | `AGENT_HUB_USER=<handle>` のみ |
+
+> ⚠️ **`AUTH_MODE=trust` は localhost 専用**: 認証なしで誰でも接続できるため、インターネット公開環境では絶対に使用しないこと。`community` edition では `pat` を使用してください。
+
+`AUTH_MODE=trust` でブリッジが 401 Unauthorized になる場合、server 側の `AUTH_MODE` が `pat` のままである可能性があります。`curl http://localhost:3000/health` のレスポンスで `auth_mode` フィールドを確認してください。
+
 ### Step 3: bridge を self-host mode で起動
 
 ```bash
@@ -283,6 +296,8 @@ docker-compose logs -f       # log を tail
 --edition <community|private>  Self-host edition
 --dry-run                  実行内容のみ print、副作用なし
 --skip-docker-pull         Docker image pull を skip
+--no-service               launchd/systemd unit 配備を skip (power user 手動管理用)
+                           env: AGENT_HUB_NO_SERVICE=<non-empty>
 -h, --help                 Usage 詳細
 -v, --version              Installer version
 ```
