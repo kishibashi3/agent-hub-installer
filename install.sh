@@ -450,6 +450,35 @@ clone_roles_repo() {
   run_or_dry gh repo clone "${ROLES_REPO}" "${roles_dir}"
 }
 
+check_roles_upstream_guard() {
+  # Guard against using the upstream template directly as roles workdir (issue #28).
+  # Tier 2 のみ: cloned roles dir の git remote origin が upstream template
+  # (kishibashi3/agent-hub-roles) を指していたら強い WARNING を出す。
+  # bypassPermissions で動く peer が canonical template に直接 commit/push するリスクを防ぐ。
+  # 非致命的: インストール自体は続行するが、ユーザーに明示的に気づかせる。
+  [[ "${TIER}" == "2" ]] || return 0
+  local roles_dir="${AGENT_HUB_DIR}/roles-repo"
+  [[ -d "${roles_dir}/.git" ]] || return 0   # dry-run 等で未 clone の場合はスキップ
+
+  local remote_url
+  remote_url=$(git -C "${roles_dir}" remote get-url origin 2>/dev/null || true)
+  [[ -z "${remote_url}" ]] && return 0
+
+  # HTTPS / SSH / gh shorthand の全形式で upstream template を検出
+  # 例: https://github.com/kishibashi3/agent-hub-roles.git
+  #      git@github.com:kishibashi3/agent-hub-roles.git
+  #      kishibashi3/agent-hub-roles
+  if printf '%s' "${remote_url}" | grep -qiE '(^|[:/])kishibashi3/agent-hub-roles(\.git)?$'; then
+    echo
+    warn "⚠️  WARNING: roles workdir is the UPSTREAM TEMPLATE (kishibashi3/agent-hub-roles), not a private fork."
+    warn "    Commits / pushes here will pollute the canonical template distributed to all users."
+    warn "    → Use Tier 2 with your own fork:"
+    warn "        installer --tier 2 --roles-repo <your-account>/agent-hub-roles"
+    warn "    → Or work on a throwaway branch if you really mean to experiment locally."
+    echo
+  fi
+}
+
 write_env_file() {
   # config.yaml を廃止し env inject 方式に統一。
   # AGENT_HUB_URL / AGENT_HUB_TENANT を ${AGENT_HUB_DIR}/.env に書く。
@@ -1248,8 +1277,9 @@ main() {
   install_python_packages
   init_agent_hub_dir
 
-  clone_roles_repo   # Tier 2 のみ: private fork clone
-  write_env_file     # AGENT_HUB_URL / AGENT_HUB_TENANT を .env に書く
+  clone_roles_repo              # Tier 2 のみ: private fork clone
+  check_roles_upstream_guard   # upstream template を直接 clone していたら警告 (issue #28)
+  write_env_file                # AGENT_HUB_URL / AGENT_HUB_TENANT を .env に書く
   write_env_sh       # Claude Code 起動用 env.sh を生成 (issue #22)
   write_shell_rc     # shell rc に source ~/.agent-hub/env.sh を追記 (issue #35)
   apply_applocal_patches   # plugin cache patches (issue #34)
