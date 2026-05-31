@@ -37,6 +37,7 @@ EDITION=""          # used for self-host (community | private)
 DRY_RUN="no"
 SKIP_DOCKER_PULL="no"
 SUBCOMMAND=""
+NO_SERVICE="${AGENT_HUB_NO_SERVICE:-no}"   # --no-service / AGENT_HUB_NO_SERVICE=1 で launchd/systemd 配備を skip
 
 # ============================================================
 # UI helpers
@@ -87,6 +88,8 @@ OPTIONS:
                              default: hub-mode から自動決定
                              (public: https://agent-hub-ki.fly.dev/mcp / self-host: http://localhost:3000/mcp)
   --edition <community|private>  Self-host edition (= --hub-mode self-host のみ)
+  --no-service               launchd/systemd unit の自動配備を skip (= power user の手動管理用)
+                             env: AGENT_HUB_NO_SERVICE=1 でも同様
   --dry-run                  実行内容のみ print、 副作用なし (= debug 用)
   --skip-docker-pull         Docker image pull を skip (= 開発 / 既 pull 済 path)
   -h, --help                 このメッセージ
@@ -162,6 +165,10 @@ parse_args() {
         ;;
       --skip-docker-pull)
         SKIP_DOCKER_PULL="yes"
+        shift
+        ;;
+      --no-service)
+        NO_SERVICE="yes"
         shift
         ;;
       -h|--help)
@@ -613,7 +620,13 @@ install_autostart_unit() {
   # Only for self-host mode: deploy an OS-specific autostart unit so the hub
   # starts automatically on login (macOS LaunchAgent) or boot (Linux systemd user service).
   # Idempotent: skip if the unit file already exists.
+  # Power users who prefer manual service management can pass --no-service or
+  # set AGENT_HUB_NO_SERVICE=1 to skip this step entirely.
   [[ "${HUB_MODE}" == "self-host" ]] || return 0
+  if [[ "${NO_SERVICE}" == "yes" ]] || [[ "${AGENT_HUB_NO_SERVICE:-}" == "1" ]]; then
+    info "Skipping autostart unit deployment (--no-service / AGENT_HUB_NO_SERVICE=1)"
+    return 0
+  fi
 
   local os_name
   os_name=$(uname -s)
