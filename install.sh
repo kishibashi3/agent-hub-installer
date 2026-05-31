@@ -440,6 +440,7 @@ auto_fork_roles_repo() {
 
 clone_roles_repo() {
   # Tier 2 のみ: private fork を ${AGENT_HUB_DIR}/roles-repo に clone
+  # NOTE: roles_dir パスは check_roles_upstream_guard() と共有 — 変更時は両関数を同期すること
   [[ "${TIER}" == "2" ]] || return 0
   local roles_dir="${AGENT_HUB_DIR}/roles-repo"
   if [[ -d "${roles_dir}" ]]; then
@@ -457,7 +458,7 @@ check_roles_upstream_guard() {
   # bypassPermissions で動く peer が canonical template に直接 commit/push するリスクを防ぐ。
   # 非致命的: インストール自体は続行するが、ユーザーに明示的に気づかせる。
   [[ "${TIER}" == "2" ]] || return 0
-  local roles_dir="${AGENT_HUB_DIR}/roles-repo"
+  local roles_dir="${AGENT_HUB_DIR}/roles-repo"  # must match clone_roles_repo()
   [[ -d "${roles_dir}/.git" ]] || return 0   # dry-run 等で未 clone の場合はスキップ
 
   local remote_url
@@ -470,11 +471,11 @@ check_roles_upstream_guard() {
   #      kishibashi3/agent-hub-roles
   if printf '%s' "${remote_url}" | grep -qiE '(^|[:/])kishibashi3/agent-hub-roles(\.git)?$'; then
     echo
-    warn "⚠️  WARNING: roles workdir is the UPSTREAM TEMPLATE (kishibashi3/agent-hub-roles), not a private fork."
-    warn "    Commits / pushes here will pollute the canonical template distributed to all users."
-    warn "    → Use Tier 2 with your own fork:"
-    warn "        installer --tier 2 --roles-repo <your-account>/agent-hub-roles"
-    warn "    → Or work on a throwaway branch if you really mean to experiment locally."
+    warn "roles workdir is the UPSTREAM TEMPLATE (kishibashi3/agent-hub-roles), not a private fork."
+    warn "  Commits / pushes here will pollute the canonical template distributed to all users."
+    warn "  → Use Tier 2 with your own fork:"
+    warn "      installer --tier 2 --roles-repo <your-account>/agent-hub-roles"
+    warn "  → Or work on a throwaway branch if you really mean to experiment locally."
     echo
   fi
 }
