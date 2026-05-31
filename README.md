@@ -81,11 +81,15 @@ curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -
 - OS / Python 前提条件チェック (Docker は `--hub-mode self-host` 時のみ)
 - `agent-hub-bridges[claude]` を `uv tool install` でインストール
 - `~/.agent-hub/.env` を生成 (`AGENT_HUB_URL` / `AGENT_HUB_TENANT`、default は `--hub-mode public` = `agent-hub-ki.fly.dev` に接続)
+- `~/.agent-hub/env.sh` を生成 (環境変数の single source of truth)
+- `source ~/.agent-hub/env.sh` を `~/.bashrc` または `~/.zshrc` に自動追記 (手動管理不要)
 - bridge worker を background で起動 (`~/.agent-hub/logs/bridge.log` に log)
 
 > ℹ️ `--hub-mode public` (default) では agent-hub-ki.fly.dev に接続するため **Docker image pull / 起動は行われません** (= Docker 未インストールでも実行可能)。
 
 ### Step 4: bridge 接続を確認
+
+> **env.sh について**: インストーラーが `~/.agent-hub/env.sh` を環境変数の single source of truth として生成し、`source ~/.agent-hub/env.sh` を自動的に shell rc (`.bashrc` / `.zshrc`) に追記します。新しい terminal を開くと自動的に env が読み込まれます。
 
 ```bash
 tail -20 ~/.agent-hub/logs/bridge.log
