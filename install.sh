@@ -512,7 +512,8 @@ write_env_sh() {
   # env.sh を source してから claude を起動することで env propagation を installer が担う。
   # GITHUB_PAT は secret hygiene のため書かない (caller env / gh auth token で取得)。
   # 既存の env.sh は上書きしない (= .env と同じ idempotent 方針)。
-  # 書き込む変数: AGENT_HUB_URL, AGENT_HUB_TENANT, AGENT_HUB_USER, AGENT_HUB_ROLES (issue #33)
+  # 書き込む変数: AGENT_HUB_URL, AGENT_HUB_TENANT, AGENT_HUB_USER, AGENT_HUB_ROLES (issue #33),
+  #              BRIDGE_LOG_DIR (agent-hub-roles#8)
   local env_sh="${AGENT_HUB_DIR}/env.sh"
   if [[ -f "${env_sh}" ]]; then
     info "env.sh exists at ${env_sh}, preserving"
@@ -526,7 +527,7 @@ write_env_sh() {
     roles_path="${AGENT_HUB_DIR}/roles"
   fi
   if [[ "${DRY_RUN}" == "yes" ]]; then
-    c_dim "[dry-run] would write ${env_sh} (AGENT_HUB_URL=${AGENT_HUB_URL}, AGENT_HUB_TENANT=${USER_HANDLE}, AGENT_HUB_USER=${USER_HANDLE}, AGENT_HUB_ROLES=${roles_path})"
+    c_dim "[dry-run] would write ${env_sh} (AGENT_HUB_URL=${AGENT_HUB_URL}, AGENT_HUB_TENANT=${USER_HANDLE}, AGENT_HUB_USER=${USER_HANDLE}, AGENT_HUB_ROLES=${roles_path}, BRIDGE_LOG_DIR=\${BRIDGE_LOG_DIR:-\$HOME/.agent-hub/logs})"
     return
   fi
   # Critical (issue #22 review): コメント行に $(gh auth token) があるため、
@@ -543,6 +544,11 @@ write_env_sh() {
 EOF
   printf 'export AGENT_HUB_URL="%s"\nexport AGENT_HUB_TENANT="%s"\nexport AGENT_HUB_USER="%s"\nexport AGENT_HUB_ROLES="%s"\n' \
     "${AGENT_HUB_URL}" "${USER_HANDLE}" "${USER_HANDLE}" "${roles_path}" >> "${env_sh}"
+  # BRIDGE_LOG_DIR: 呼び出し元環境で既に設定済みなら優先、未設定なら ~/.agent-hub/logs をデフォルト。
+  # リテラルで書き込み、env.sh source 時に評価させる (= install 時の $HOME ではなく source 時の $HOME を使う)。
+  cat >> "${env_sh}" <<'EOF'
+export BRIDGE_LOG_DIR="${BRIDGE_LOG_DIR:-$HOME/.agent-hub/logs}"
+EOF
   chmod 600 "${env_sh}"
   ok "env.sh written (${env_sh}) ✅"
 }
