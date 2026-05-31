@@ -37,7 +37,7 @@ EDITION=""          # used for self-host (community | private)
 DRY_RUN="no"
 SKIP_DOCKER_PULL="no"
 SUBCOMMAND=""
-NO_SERVICE="${AGENT_HUB_NO_SERVICE:-no}"   # --no-service / AGENT_HUB_NO_SERVICE=1 で launchd/systemd 配備を skip
+NO_SERVICE="${AGENT_HUB_NO_SERVICE:-}"     # --no-service / AGENT_HUB_NO_SERVICE=<non-empty> で launchd/systemd 配備を skip (NO_COLOR 型 binary semantic)
 
 # ============================================================
 # UI helpers
@@ -89,7 +89,7 @@ OPTIONS:
                              (public: https://agent-hub-ki.fly.dev/mcp / self-host: http://localhost:3000/mcp)
   --edition <community|private>  Self-host edition (= --hub-mode self-host のみ)
   --no-service               launchd/systemd unit の自動配備を skip (= power user の手動管理用)
-                             env: AGENT_HUB_NO_SERVICE=1 でも同様
+                             env: AGENT_HUB_NO_SERVICE=<non-empty> でも同様 (binary semantic: 値は不問)
   --dry-run                  実行内容のみ print、 副作用なし (= debug 用)
   --skip-docker-pull         Docker image pull を skip (= 開発 / 既 pull 済 path)
   -h, --help                 このメッセージ
@@ -168,7 +168,7 @@ parse_args() {
         shift
         ;;
       --no-service)
-        NO_SERVICE="yes"
+        NO_SERVICE="1"   # non-empty = skip (binary semantic、値は不問)
         shift
         ;;
       -h|--help)
@@ -538,7 +538,7 @@ write_compose_file() {
   fi
   # Use quoted heredoc (<<'EOF') to prevent shell expansion of ${...} in compose content.
   cat > "${compose_file}" <<'COMPOSE_EOF'
-version: "3.8"
+# docker compose v2 — `version` key は非推奨のため省略
 services:
   agent-hub:
     image: ghcr.io/kishibashi3/agent-hub:latest
@@ -598,15 +598,25 @@ write_hub_start_script() {
   # Header uses quoted heredoc; cd path is baked in via printf to avoid expansion issues.
   cat > "${start_script}" <<'SCRIPT_EOF'
 #!/usr/bin/env bash
-# agent-hub start helper — detects docker compose v1 vs v2 and starts the hub.
+# agent-hub hub helper — detects docker compose v1 vs v2.
+# Usage: start-hub.sh [up|down]   (default: up = start in background)
 set -euo pipefail
 SCRIPT_EOF
   printf 'cd "%s"\n' "${AGENT_HUB_DIR}" >> "${start_script}"
   cat >> "${start_script}" <<'SCRIPT_EOF'
+CMD="${1:-up}"
 if command -v docker-compose >/dev/null 2>&1; then
-  exec docker-compose up -d
+  case "${CMD}" in
+    up)   exec docker-compose up -d ;;
+    down) exec docker-compose down ;;
+    *)    exec docker-compose "${@}" ;;
+  esac
 elif docker compose version >/dev/null 2>&1; then
-  exec docker compose up -d
+  case "${CMD}" in
+    up)   exec docker compose up -d ;;
+    down) exec docker compose down ;;
+    *)    exec docker compose "${@}" ;;
+  esac
 else
   echo "[err] neither 'docker-compose' nor 'docker compose' found" >&2
   exit 1
@@ -621,10 +631,11 @@ install_autostart_unit() {
   # starts automatically on login (macOS LaunchAgent) or boot (Linux systemd user service).
   # Idempotent: skip if the unit file already exists.
   # Power users who prefer manual service management can pass --no-service or
-  # set AGENT_HUB_NO_SERVICE=1 to skip this step entirely.
+  # set AGENT_HUB_NO_SERVICE=<any non-empty value> to skip this step entirely.
+  # Binary semantic (NO_COLOR 型): non-empty = skip, empty / unset = deploy.
   [[ "${HUB_MODE}" == "self-host" ]] || return 0
-  if [[ "${NO_SERVICE}" == "yes" ]] || [[ "${AGENT_HUB_NO_SERVICE:-}" == "1" ]]; then
-    info "Skipping autostart unit deployment (--no-service / AGENT_HUB_NO_SERVICE=1)"
+  if [[ -n "${NO_SERVICE}" ]]; then
+    info "Skipping autostart unit deployment (--no-service / AGENT_HUB_NO_SERVICE set)"
     return 0
   fi
 
@@ -663,6 +674,7 @@ install_autostart_unit() {
     </array>
     <key>RunAtLoad</key>
     <true/>
+    <!-- KeepAlive=false: クラッシュ後の再起動は Docker の restart: unless-stopped に委ねる -->
     <key>KeepAlive</key>
     <false/>
     <key>StandardOutPath</key>
@@ -672,10 +684,12 @@ install_autostart_unit() {
 </dict>
 </plist>
 PLIST_EOF
-      if launchctl load "${plist_file}" 2>/dev/null; then
+      local _launchctl_out
+      if _launchctl_out=$(launchctl load "${plist_file}" 2>&1); then
         ok "LaunchAgent loaded (${plist_file}) ✅"
       else
-        warn "launchctl load failed (newer macOS may need 'launchctl bootstrap gui/\$(id -u) ${plist_file}')"
+        warn "launchctl load failed: ${_launchctl_out}"
+        warn "  Newer macOS: try 'launchctl bootstrap gui/\$(id -u) ${plist_file}'"
         warn "  The plist is written; it will take effect on next login."
       fi
       ;;
@@ -707,7 +721,7 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=${AGENT_HUB_DIR}
 ExecStart=${AGENT_HUB_DIR}/start-hub.sh
-ExecStop=docker compose down
+ExecStop=${AGENT_HUB_DIR}/start-hub.sh down
 StandardOutput=append:${AGENT_HUB_DIR}/logs/hub-systemd.log
 StandardError=append:${AGENT_HUB_DIR}/logs/hub-systemd-err.log
 
@@ -1014,22 +1028,28 @@ print_summary() {
   echo
   if [[ "${HUB_MODE}" == "self-host" ]]; then
     echo
-    c_bold "  ─── Self-host hub (autostart) ───────────────────────────"
-    echo "  Compose file : ~/.agent-hub/docker-compose.yml"
-    echo "  Data dir     : ~/.agent-hub/data/"
-    local _os_name
-    _os_name=$(uname -s)
-    if [[ "${_os_name}" == "Darwin" ]]; then
-      echo "  LaunchAgent  : ~/Library/LaunchAgents/com.kishibashi3.agent-hub.plist"
-      c_dim "    → hub auto-starts on login (RunAtLoad=true)"
-      c_dim "    → logs: ~/.agent-hub/logs/hub-launchd.log"
+    c_bold "  ─── Self-host hub ───────────────────────────────────────"
+    echo "  Compose file : ${AGENT_HUB_DIR}/docker-compose.yml"
+    echo "  Data dir     : ${AGENT_HUB_DIR}/data/"
+    if [[ -z "${NO_SERVICE}" ]]; then
+      local _os_name
+      _os_name=$(uname -s)
+      if [[ "${_os_name}" == "Darwin" ]]; then
+        echo "  LaunchAgent  : ~/Library/LaunchAgents/com.kishibashi3.agent-hub.plist"
+        c_dim "    → RunAtLoad=true: hub started now and on each login"
+        c_dim "    → logs: ${AGENT_HUB_DIR}/logs/hub-launchd.log"
+      else
+        echo "  systemd unit : ~/.config/systemd/user/agent-hub.service"
+        c_dim "    → enabled: hub auto-starts on next boot"
+        c_dim "    → 初回は手動起動が必要: ${AGENT_HUB_DIR}/start-hub.sh"
+        c_dim "      (または: systemctl --user start agent-hub.service)"
+        c_dim "    → logs: ${AGENT_HUB_DIR}/logs/hub-systemd.log"
+      fi
     else
-      echo "  systemd unit : ~/.config/systemd/user/agent-hub.service"
-      c_dim "    → hub auto-starts on boot (WantedBy=default.target)"
-      c_dim "    → logs: ~/.agent-hub/logs/hub-systemd.log"
+      c_dim "  (autostart unit skipped — --no-service)"
+      c_dim "  → 手動起動: ${AGENT_HUB_DIR}/start-hub.sh"
     fi
-    echo "  Manual start : ~/.agent-hub/start-hub.sh"
-    c_dim "  (or: docker compose -f ~/.agent-hub/docker-compose.yml up -d)"
+    echo "  Manual ctrl  : ${AGENT_HUB_DIR}/start-hub.sh [up|down]"
     echo
   fi
   c_bold "  ─── トラブルシュート ────────────────────────────────────"
