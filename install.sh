@@ -541,19 +541,25 @@ doctor_cmd() {
   fi
 
   # ── Check 2: Hub reachability ────────────────────────────────
-  local _hub_url="${AGENT_HUB_URL:-${AGENT_HUB_URL_DEFAULT}}"
-  # Strip /mcp suffix to get base URL, then append /health
-  local _hub_base="${_hub_url%/mcp}"
-  _hub_base="${_hub_base%/}"
-  local _health_url="${_hub_base}/health"
+  local _hub_url="${AGENT_HUB_URL:-}"
   local _hub_alive="yes"
-  if curl -sf --max-time 10 "${_health_url}" >/dev/null 2>&1; then
-    ok "Hub reachability — ${_health_url} responded"
-    (( _pass++ )) || true
-  else
-    err "[fail]  Hub reachability — ${_health_url} did not respond (hub down?)"
-    (( _fail++ )) || true
+  if [[ -z "${_hub_url}" ]]; then
+    warn "[warn]  Hub reachability — AGENT_HUB_URL not set (source ~/.agent-hub/env.sh?), skipping"
+    (( _warn++ )) || true
     _hub_alive="no"
+  else
+    # Strip /mcp suffix to get base URL, then append /health
+    local _hub_base="${_hub_url%/mcp}"
+    _hub_base="${_hub_base%/}"
+    local _health_url="${_hub_base}/health"
+    if curl -sf --max-time 10 "${_health_url}" >/dev/null 2>&1; then
+      ok "Hub reachability — ${_health_url} responded"
+      (( _pass++ )) || true
+    else
+      err "[fail]  Hub reachability — ${_health_url} did not respond (hub down?)"
+      (( _fail++ )) || true
+      _hub_alive="no"
+    fi
   fi
 
   # ── Check 3: Port conflict ────────────────────────────────────
@@ -565,13 +571,23 @@ doctor_cmd() {
   fi
   [[ -z "${_port}" ]] && _port="3000"
   local _port_user=""
+  local _port_tool=""
   if command -v lsof >/dev/null 2>&1; then
+    _port_tool="lsof"
     _port_user=$(lsof -ti:"${_port}" 2>/dev/null | head -1 || true)
   elif command -v ss >/dev/null 2>&1; then
-    _port_user=$(ss -ltn 2>/dev/null | grep -E ":${_port}\s" | head -1 || true)
+    _port_tool="ss"
+    _port_user=$(ss -ltn 2>/dev/null | grep -E ":${_port}[^0-9]" | head -1 || true)
   fi
-  if [[ -n "${_port_user}" ]]; then
-    warn "[warn]  Port conflict — port ${_port} is in use (PID/info: ${_port_user}). Hub may conflict."
+  if [[ -z "${_port_tool}" ]]; then
+    warn "[warn]  Port conflict — neither lsof nor ss available, cannot check port ${_port}"
+    (( _warn++ )) || true
+  elif [[ -n "${_port_user}" ]]; then
+    if [[ "${_port_tool}" == "lsof" ]]; then
+      warn "[warn]  Port conflict — port ${_port} is in use by PID ${_port_user}. Hub may conflict."
+    else
+      warn "[warn]  Port conflict — port ${_port} is in use (ss: ${_port_user}). Hub may conflict."
+    fi
     (( _warn++ )) || true
   else
     ok "Port conflict — port ${_port} is free"
@@ -579,7 +595,8 @@ doctor_cmd() {
   fi
 
   # ── Check 4: sed compatibility ────────────────────────────────
-  local _sed_test="/tmp/agent-hub-doctor-sed-$$"
+  local _sed_test
+  _sed_test=$(mktemp 2>/dev/null || echo "/tmp/agent-hub-doctor-sed-$$")
   printf 'test' > "${_sed_test}"
   if sed -i '' 's/test/ok/' "${_sed_test}" 2>/dev/null; then
     ok "sed compatibility — BSD sed (-i '' syntax) works"
@@ -630,8 +647,8 @@ doctor_cmd() {
   local _watch_sh
   _watch_sh=$(find "${HOME}/.claude" -name watch.sh 2>/dev/null | head -1 || true)
   if [[ -z "${_watch_sh}" ]]; then
-    warn "[warn]  plugin patch status — watch.sh not found under ~/.claude (agent-hub plugin installed?)"
-    (( _warn++ )) || true
+    ok "plugin patch status — watch.sh not found (agent-hub plugin not installed, skip)"
+    (( _pass++ )) || true
   else
     if grep -q 'grep -oP' "${_watch_sh}" 2>/dev/null; then
       warn "[warn]  plugin patch status — ${_watch_sh} contains 'grep -oP' (BSD grep incompatible; patch needed)"
@@ -790,8 +807,8 @@ main() {
   parse_args "$@"
 
   if [[ "${SUBCOMMAND}" == "doctor" ]]; then
-    doctor_cmd
-    exit $?
+    doctor_cmd || exit 1
+    exit 0
   fi
 
   resolve_hub_url     # --hub-url / caller env / --hub-mode から AGENT_HUB_URL を確定 (issue #20)
