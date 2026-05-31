@@ -286,6 +286,41 @@ docker-compose logs -f       # log を tail
 
 ---
 
+## agenthubctl — PE 玄関コマンド
+
+インストール後、`~/.local/bin/agenthubctl` が配置されます。  
+**3行で「AI チームと働き始める」** を実現する PE entry command です。
+
+```bash
+curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash
+agenthubctl init --user mybot    # env.sh 生成（設定）
+agenthubctl start                # operator として claude 起動
+```
+
+### サブコマンド
+
+| コマンド | 動作 |
+|---|---|
+| `agenthubctl init [--user <handle>] [--hub-url <url>]` | `~/.agent-hub/env.sh` を生成し `~/.bashrc` / `~/.zshrc` に source 行を追記 |
+| `agenthubctl start` | env.sh を source して operator persona で `claude` を起動 |
+| `agenthubctl doctor` | 環境チェック (installer の `doctor` サブコマンドに委譲) |
+
+### `start` の動作
+
+1. `~/.agent-hub/env.sh` を読み込む（未生成なら `agenthubctl init` を案内）
+2. `${AGENT_HUB_ROLES}/operator/CLAUDE.md` が存在すれば、そのディレクトリを workdir として `claude` を起動
+3. Claude Code 起動時に `CLAUDE.md` が自動読み込まれ、inbox 監視・peer 通信がすぐ始まる
+
+### PATH 設定
+
+`~/.local/bin` が PATH に含まれていない場合は installer が警告します。shell rc に追加:
+
+```bash
+export PATH="${HOME}/.local/bin:${PATH}"
+```
+
+---
+
 ## Options reference
 
 ```
