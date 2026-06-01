@@ -255,9 +255,9 @@ server `.env` の `AGENT_HUB_AUTH_MODE` (= `AGENT_HUB_EDITION` ではなく serv
 | `pat` **(default)** | インターネット公開 / multi-tenant | `AGENT_HUB_GITHUB_PAT=ghp_...` (scope: `read:user`) | `AGENT_HUB_GITHUB_PAT` を export |
 | `trust` | localhost 専用 / LAN 内テスト | 不要 | `AGENT_HUB_USER=<handle>` のみ |
 
-> ⚠️ **`AUTH_MODE=trust` は localhost 専用**: 認証なしで誰でも接続できるため、インターネット公開環境では絶対に使用しないこと。`community` edition では `pat` を使用してください。
+> ⚠️ **`AGENT_HUB_AUTH_MODE=trust` は localhost 専用**: 認証なしで誰でも接続できるため、インターネット公開環境では絶対に使用しないこと。`community` edition では `pat` を使用してください。
 
-`AUTH_MODE=trust` でブリッジが 401 Unauthorized になる場合、server 側の `AGENT_HUB_AUTH_MODE` が `pat` のままである可能性があります。`curl http://localhost:3000/health` のレスポンスで `auth_mode` フィールドを確認してください。
+`AGENT_HUB_AUTH_MODE=trust` でブリッジが 401 Unauthorized になる場合、server 側の `AGENT_HUB_AUTH_MODE` が `pat` のままである可能性があります。`curl http://localhost:3000/health` のレスポンスで `auth_mode` フィールドを確認してください。
 
 ### Step 3: bridge を self-host mode で起動
 
@@ -343,6 +343,42 @@ export PATH="${HOME}/.local/bin:${PATH}"
 curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -s -- \
   --dry-run --user mybot
 ```
+
+---
+
+## アップグレード手順 (既存インストールからの移行)
+
+agent-hub v1.x → v2 以降では環境変数名が `AGENT_HUB_` prefix に統一されました。  
+既存の `~/.agent-hub/env.sh` または `.env` をお持ちの場合は以下の通り変数名を更新してください。
+
+| 旧変数名 | 新変数名 |
+|---|---|
+| `GITHUB_PAT` | `AGENT_HUB_GITHUB_PAT` |
+| `DB_PATH` | `AGENT_HUB_DB_PATH` |
+| `AUTH_MODE` | `AGENT_HUB_AUTH_MODE` |
+
+**手順**:
+
+```bash
+# 1. env.sh を更新 (sed で一括置換)
+sed -i \
+  -e 's/\bGITHUB_PAT\b/AGENT_HUB_GITHUB_PAT/g' \
+  -e 's/\bDB_PATH\b/AGENT_HUB_DB_PATH/g' \
+  -e 's/\bAUTH_MODE\b/AGENT_HUB_AUTH_MODE/g' \
+  ~/.agent-hub/env.sh
+
+# 2. self-host の場合は .env も更新
+sed -i \
+  -e 's/^GITHUB_PAT=/AGENT_HUB_GITHUB_PAT=/' \
+  -e 's/^DB_PATH=/AGENT_HUB_DB_PATH=/' \
+  -e 's/^AUTH_MODE=/AGENT_HUB_AUTH_MODE=/' \
+  .env
+
+# 3. bridge を再起動して反映
+```
+
+> **注意**: `AGENT_HUB_EDITION` は v2 から **必須** になりました。未設定の場合は起動時にエラーになります。  
+> `.env` に `AGENT_HUB_EDITION=community` (インターネット公開) または `AGENT_HUB_EDITION=private` (LAN 専用) を明示してください。
 
 ---
 
