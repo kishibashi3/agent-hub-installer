@@ -54,7 +54,7 @@ Tier 2 のみ追加で:
 3. token を copy → shell に export:
 
 ```bash
-export GITHUB_PAT='ghp_xxx...'
+export AGENT_HUB_GITHUB_PAT='ghp_xxx...'
 ```
 
 ### Step 2: ANTHROPIC_API_KEY (= Claude MAX user は skip)
@@ -95,11 +95,11 @@ curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -
 tail -20 ~/.agent-hub/logs/bridge.log
 ```
 
-`registered` または `connected` が見えれば OK。見えない場合は `GITHUB_PAT` が正しく export されているか確認してから bridge を再起動してください (`<your-handle>` は `--user` で指定した handle に置き換えてください):
+`registered` または `connected` が見えれば OK。見えない場合は `AGENT_HUB_GITHUB_PAT` が正しく export されているか確認してから bridge を再起動してください (`<your-handle>` は `--user` で指定した handle に置き換えてください):
 
 ```bash
 pkill -f "agent-hub-bridge-claude.*--user.*<your-handle>"
-export GITHUB_PAT=$(gh auth token)   # gh なし? → https://github.com/settings/tokens (scope: read:user)
+export AGENT_HUB_GITHUB_PAT=$(gh auth token)   # gh なし? → https://github.com/settings/tokens (scope: read:user)
 source ~/.agent-hub/env.sh
 nohup agent-hub-bridge-claude --user <your-handle> >> ~/.agent-hub/logs/bridge.log 2>&1 &
 ```
@@ -185,7 +185,7 @@ curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -
 これで:
 - fork (`myname/agent-hub-roles`) を `~/.agent-hub/roles-repo` に clone
 - `~/.agent-hub/.env` を生成 (`AGENT_HUB_URL` / `AGENT_HUB_TENANT`)
-- bridge worker が起動 (`GITHUB_PAT` は caller env から継承)
+- bridge worker が起動 (`AGENT_HUB_GITHUB_PAT` は caller env から継承)
 
 ### Step 5: 動作確認 + customization workflow
 
@@ -226,7 +226,7 @@ cp .env.example .env
 | 変数 | 説明 | 必須 |
 |---|---|---|
 | `AGENT_HUB_EDITION` | `community` (PAT 認証) または `private` (LAN 専用 trust) | ✅ |
-| `GITHUB_PAT` | GitHub PAT (scope: `read:user`)。`community` edition のみ必須 | community 時 ✅ |
+| `AGENT_HUB_GITHUB_PAT` | GitHub PAT (scope: `read:user`)。`community` edition のみ必須 | community 時 ✅ |
 | `AGENT_HUB_TENANT` | tenant 名 (省略可) | — |
 | `AGENT_HUB_URL` | bridge から見た MCP endpoint (default: `http://localhost:3000/mcp`) | ✅ |
 
@@ -246,23 +246,23 @@ curl http://localhost:3000/health      # {"status":"ok"} が返れば OK
 
 > ℹ️ dashboard (ポート 8080) も合わせて起動します。不要な場合は `docker-compose.yml` の `dashboard:` セクションをコメントアウトしてください。
 
-### AUTH_MODE × client 認証方式
+### AGENT_HUB_AUTH_MODE × client 認証方式
 
-server `.env` の `AUTH_MODE` (= `AGENT_HUB_EDITION` ではなく server 起動時に設定される認証モード) によって、bridge / Claude Code に必要な認証手段が変わります。
+server `.env` の `AGENT_HUB_AUTH_MODE` (= `AGENT_HUB_EDITION` ではなく server 起動時に設定される認証モード) によって、bridge / Claude Code に必要な認証手段が変わります。
 
-| Server `AUTH_MODE` | 用途 | Bridge 必須 env | Claude Code 必須 env |
+| Server `AGENT_HUB_AUTH_MODE` | 用途 | Bridge 必須 env | Claude Code 必須 env |
 |---|---|---|---|
-| `pat` **(default)** | インターネット公開 / multi-tenant | `GITHUB_PAT=ghp_...` (scope: `read:user`) | `GITHUB_PAT` を export |
+| `pat` **(default)** | インターネット公開 / multi-tenant | `AGENT_HUB_GITHUB_PAT=ghp_...` (scope: `read:user`) | `AGENT_HUB_GITHUB_PAT` を export |
 | `trust` | localhost 専用 / LAN 内テスト | 不要 | `AGENT_HUB_USER=<handle>` のみ |
 
 > ⚠️ **`AUTH_MODE=trust` は localhost 専用**: 認証なしで誰でも接続できるため、インターネット公開環境では絶対に使用しないこと。`community` edition では `pat` を使用してください。
 
-`AUTH_MODE=trust` でブリッジが 401 Unauthorized になる場合、server 側の `AUTH_MODE` が `pat` のままである可能性があります。`curl http://localhost:3000/health` のレスポンスで `auth_mode` フィールドを確認してください。
+`AUTH_MODE=trust` でブリッジが 401 Unauthorized になる場合、server 側の `AGENT_HUB_AUTH_MODE` が `pat` のままである可能性があります。`curl http://localhost:3000/health` のレスポンスで `auth_mode` フィールドを確認してください。
 
 ### Step 3: bridge を self-host mode で起動
 
 ```bash
-export GITHUB_PAT=<your-pat>
+export AGENT_HUB_GITHUB_PAT=<your-pat>
 export AGENT_HUB_URL=http://localhost:3000/mcp
 
 curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -s -- \
