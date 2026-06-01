@@ -227,7 +227,7 @@ resolve_hub_url() {
 }
 
 probe_auth_mode() {
-  # Probe the hub's /health endpoint to detect AUTH_MODE and guide user.
+  # Probe the hub's /health endpoint to detect AGENT_HUB_AUTH_MODE and guide user.
   # Graceful: no-op if hub is unreachable or response omits auth_mode field
   # (older server versions may not expose it — see kishibashi3/agent-hub for server-side PR).
   local _base="${AGENT_HUB_URL%/}"
@@ -253,21 +253,21 @@ probe_auth_mode() {
 
   case "${_auth_mode}" in
     pat)
-      info "Hub AUTH_MODE: pat (via /health)"
-      if [[ -z "${GITHUB_PAT:-}" ]]; then
-        warn "  GITHUB_PAT が未設定です。bridge 起動前に export してください:"
-        warn "    export GITHUB_PAT=\$(gh auth token)"
+      info "Hub AGENT_HUB_AUTH_MODE: pat (via /health)"
+      if [[ -z "${AGENT_HUB_GITHUB_PAT:-}" ]]; then
+        warn "  AGENT_HUB_GITHUB_PAT が未設定です。bridge 起動前に export してください:"
+        warn "    export AGENT_HUB_GITHUB_PAT=\$(gh auth token)"
       fi
       ;;
     trust)
-      info "Hub AUTH_MODE: trust (via /health) — GITHUB_PAT は不要です"
+      info "Hub AGENT_HUB_AUTH_MODE: trust (via /health) — AGENT_HUB_GITHUB_PAT は不要です"
       info "  AGENT_HUB_USER=<handle> を env.sh に設定してください (TOFU 認証)"
       ;;
     "")
       # auth_mode not in /health response — older server or field not exposed
       ;;
     *)
-      info "Hub AUTH_MODE: ${_auth_mode} (via /health)"
+      info "Hub AGENT_HUB_AUTH_MODE: ${_auth_mode} (via /health)"
       ;;
   esac
 }
@@ -349,8 +349,8 @@ check_prereqs() {
       warn "gh CLI version ${gh_version} is outdated (need 2.6.0+)."
       warn "  Ubuntu 22.04 標準 apt では古い版が入ります。公式インストール手順で更新してください:"
       warn "  https://github.com/cli/cli/blob/trunk/docs/install_linux.md"
-      warn "  → GITHUB_PAT を手動で export して続行することもできます:"
-      warn "  →   export GITHUB_PAT=ghp_..."
+      warn "  → AGENT_HUB_GITHUB_PAT を手動で export して続行することもできます:"
+      warn "  →   export AGENT_HUB_GITHUB_PAT=ghp_..."
     fi
     if ! gh auth status >/dev/null 2>&1; then
       die "gh CLI not authenticated. Run: gh auth login"
@@ -491,7 +491,7 @@ check_roles_upstream_guard() {
 write_env_file() {
   # config.yaml を廃止し env inject 方式に統一。
   # AGENT_HUB_URL / AGENT_HUB_TENANT を ${AGENT_HUB_DIR}/.env に書く。
-  # GITHUB_PAT は caller env から継承 (秘密情報をファイルに書かない)。
+  # AGENT_HUB_GITHUB_PAT は caller env から継承 (秘密情報をファイルに書かない)。
   local env_file="${AGENT_HUB_DIR}/.env"
   if [[ -f "${env_file}" ]]; then
     info "Env file exists at ${env_file}, preserving"
@@ -518,7 +518,7 @@ write_env_sh() {
   # bridge worker 側は ~/.agent-hub/.env で管理するが、 Claude Code (= MCP client) 起動時
   # の shell env は user が手動 export しない限り引き継がれず、 silent failure を招く。
   # env.sh を source してから claude を起動することで env propagation を installer が担う。
-  # GITHUB_PAT は secret hygiene のため書かない (caller env / gh auth token で取得)。
+  # AGENT_HUB_GITHUB_PAT は secret hygiene のため書かない (caller env / gh auth token で取得)。
   # 既存の env.sh は上書きしない (= .env と同じ idempotent 方針)。
   # 書き込む変数: AGENT_HUB_URL, AGENT_HUB_TENANT, AGENT_HUB_USER, AGENT_HUB_ROLES (issue #33),
   #              BRIDGE_LOG_DIR (agent-hub-roles#8)
@@ -547,9 +547,9 @@ write_env_sh() {
 # agent-hub shell env (issue #22)
 # source this file before launching Claude Code:
 #   source ~/.agent-hub/env.sh
-#   export GITHUB_PAT=$(gh auth token)
+#   export AGENT_HUB_GITHUB_PAT=$(gh auth token)
 #   claude
-# GITHUB_PAT はここには書かない (secret hygiene)。
+# AGENT_HUB_GITHUB_PAT はここには書かない (secret hygiene)。
 EOF
   printf 'export AGENT_HUB_URL="%s"\nexport AGENT_HUB_TENANT="%s"\nexport AGENT_HUB_USER="%s"\nexport AGENT_HUB_ROLES="%s"\n' \
     "${AGENT_HUB_URL}" "${USER_HANDLE}" "${USER_HANDLE}" "${roles_path}" >> "${env_sh}"
@@ -884,9 +884,9 @@ services:
       - ./data:/app/data
     environment:
       AGENT_HUB_EDITION: ${AGENT_HUB_EDITION:-}
-      GITHUB_PAT: ${GITHUB_PAT:-}
+      AGENT_HUB_GITHUB_PAT: ${AGENT_HUB_GITHUB_PAT:-}
       AGENT_HUB_TENANT: ${AGENT_HUB_TENANT:-}
-      DB_PATH: ${DB_PATH:-/app/data/app.db}
+      AGENT_HUB_DB_PATH: ${AGENT_HUB_DB_PATH:-/app/data/app.db}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
       interval: 30s
@@ -902,7 +902,7 @@ services:
     volumes:
       - ./data:/app/data:ro
     environment:
-      DB_PATH: /app/data/app.db
+      AGENT_HUB_DB_PATH: /app/data/app.db
       PORT: "8080"
       AGENT_HUB_TENANT: ${AGENT_HUB_TENANT:-}
     depends_on:
@@ -1163,7 +1163,7 @@ start_bridge() {
   # bridge CLI は --user <handle> + env vars 方式 (--config フラグは未実装)。
   # AGENT_HUB_URL は resolve_hub_url() で既に export 済み。
   # .env が存在する場合は source して bridge に伝播させる (.env 内の値が優先)。
-  # GITHUB_PAT は caller env から継承 (秘密情報をファイルに書かない)。
+  # AGENT_HUB_GITHUB_PAT は caller env から継承 (秘密情報をファイルに書かない)。
   if [[ -f "${AGENT_HUB_DIR}/.env" ]]; then
     # shellcheck source=/dev/null
     set -a; source "${AGENT_HUB_DIR}/.env"; set +a
@@ -1175,9 +1175,9 @@ start_bridge() {
   : "${AGENT_HUB_TENANT:=${USER_HANDLE}}"
   export AGENT_HUB_URL AGENT_HUB_TENANT
 
-  if [[ -z "${GITHUB_PAT:-}" ]]; then
-    warn "GITHUB_PAT is not set. Bridge will fail to authenticate."
-    warn "  Set it with: export GITHUB_PAT=<your-github-pat>"
+  if [[ -z "${AGENT_HUB_GITHUB_PAT:-}" ]]; then
+    warn "AGENT_HUB_GITHUB_PAT is not set. Bridge will fail to authenticate."
+    warn "  Set it with: export AGENT_HUB_GITHUB_PAT=<your-github-pat>"
   fi
 
   # nohup + & で daemonize + disown で shell 親子関係を切断 (= Suggestion (a) 反映、
@@ -1201,7 +1201,7 @@ doctor_cmd() {
 
   local _pass=0 _warn=0 _fail=0
 
-  # Source env files to pick up AGENT_HUB_URL / GITHUB_PAT etc.
+  # Source env files to pick up AGENT_HUB_URL / AGENT_HUB_GITHUB_PAT etc.
   # shellcheck source=/dev/null
   [[ -f "${HOME}/.agent-hub/env.sh" ]] && source "${HOME}/.agent-hub/env.sh" || true
   if [[ -f "${HOME}/.agent-hub/.env" ]]; then
@@ -1210,12 +1210,12 @@ doctor_cmd() {
   fi
 
   # ── Check 1: PAT validity ────────────────────────────────────
-  local _pat="${GITHUB_PAT:-}"
+  local _pat="${AGENT_HUB_GITHUB_PAT:-}"
   if [[ -z "${_pat}" ]] && command -v gh >/dev/null 2>&1; then
     _pat=$(gh auth token 2>/dev/null || true)
   fi
   if [[ -z "${_pat}" ]]; then
-    err "[fail]  PAT validity — GITHUB_PAT not set and gh auth token unavailable"
+    err "[fail]  PAT validity — AGENT_HUB_GITHUB_PAT not set and gh auth token unavailable"
     (( _fail++ )) || true
   elif curl -sf -H "Authorization: Bearer ${_pat}" https://api.github.com/user 2>/dev/null | grep -q '"login"'; then
     ok "PAT validity — GitHub API returned 200"
@@ -1403,8 +1403,8 @@ print_summary() {
   fi
   c_bold "  ─── Opening ceremony ────────────────────────────────────"
   echo
-  echo "  [1/4] GITHUB_PAT を設定 (bridge 認証に必要):"
-  echo "    export GITHUB_PAT=\$(gh auth token)"
+  echo "  [1/4] AGENT_HUB_GITHUB_PAT を設定 (bridge 認証に必要):"
+  echo "    export AGENT_HUB_GITHUB_PAT=\$(gh auth token)"
   c_dim "    # gh なし? → https://github.com/settings/tokens (scope: read:user)"
   echo
   echo "  [2/4] 新しい terminal を開く (または即時反映: source ~/.bashrc  /  source ~/.zshrc) + bridge を確認:"
@@ -1451,7 +1451,7 @@ print_summary() {
   c_bold "  ─── トラブルシュート ────────────────────────────────────"
   echo "  Bridge log : tail -f ~/.agent-hub/logs/bridge.log"
   echo "  Bridge PID : pgrep -f agent-hub-bridge-claude"
-  echo "  Restart    : export GITHUB_PAT=\$(gh auth token)  # gh なし? → 手動で export"
+  echo "  Restart    : export AGENT_HUB_GITHUB_PAT=\$(gh auth token)  # gh なし? → 手動で export"
   echo "               pkill -f \"agent-hub-bridge-claude.*--user.*${USER_HANDLE}\" || true"
   echo "               source ${AGENT_HUB_DIR}/env.sh"
   echo "               nohup agent-hub-bridge-claude --user ${USER_HANDLE} \\"
@@ -1481,7 +1481,7 @@ print_ce_admin_setup_guide() {
   echo "  Once your hub is running (docker-compose up -d), claim @admin to initialize the deployment."
   echo
   c_bold "  Step 1: Set environment variables"
-  echo "    export GITHUB_PAT=ghp_..."
+  echo "    export AGENT_HUB_GITHUB_PAT=ghp_..."
   c_dim "             # GitHub → Settings → Personal Access Tokens (scope: read:user)"
   echo "    export AGENT_HUB_URL=http://localhost:3000/mcp"
   c_dim "             # (or your server URL if different)"
@@ -1529,7 +1529,7 @@ main() {
   fi
 
   resolve_hub_url     # --hub-url / caller env / --hub-mode から AGENT_HUB_URL を確定 (issue #20)
-  [[ "${DRY_RUN}" == "yes" ]] || probe_auth_mode     # hub AUTH_MODE を probe して必須 env を案内 (issue #32)
+  [[ "${DRY_RUN}" == "yes" ]] || probe_auth_mode     # hub AGENT_HUB_AUTH_MODE を probe して必須 env を案内 (issue #32)
 
   info "Args: tier=${TIER}, user=${USER_HANDLE}, hub-mode=${HUB_MODE}, hub-url=${AGENT_HUB_URL}, roles-repo=${ROLES_REPO:-(none)}, dry-run=${DRY_RUN}"
 
