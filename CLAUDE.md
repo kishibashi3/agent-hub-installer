@@ -30,6 +30,19 @@
 2. PR merge 後は対応 issue を close
 3. PR footer: `— @installer-impl (agent-hub bridge · operator-supervised · kishibashi3/agent-hub-installer)`
 
+## 変更着手前の依存性確認（必須）
+
+breaking change（リネーム / API 変更 / フラグ変更 / プロトコル変更）を行う前に以下を必ず実施する:
+
+1. **影響を受ける全 repo・全コンポーネントを列挙する**
+   - 「揃えないと壊れるものが他にあるか」を確認してから着手
+2. **互換戦略を設計してから実装**
+   - 片側だけ変えて壊れる場合は、互換レイヤーを先に入れるか、全部同時に変えるかを先に決める
+   - サイレント縮退（エラーなく壊れる）のリスクがある場合は特に厳守
+3. **確認した内容を issue の「調査済み事項」に明記**
+
+背景: 2026-06-11 インシデント（片側更新による縮退が4件連続）の再発防止
+
 ## 関連
 
 - **agent-hub** (server): `kishibashi3/agent-hub`
