@@ -38,6 +38,8 @@ DRY_RUN="no"
 SKIP_DOCKER_PULL="no"
 SUBCOMMAND=""
 NO_SERVICE="${AGENT_HUB_NO_SERVICE:-}"     # --no-service / AGENT_HUB_NO_SERVICE=<non-empty> で launchd/systemd 配備を skip (NO_COLOR 型 binary semantic)
+SMOKE_TIMEOUT="${AGENT_HUB_SMOKE_TIMEOUT:-10}"   # Step 7 接続スモークテストの poll timeout 秒数 (issue #51 install-flow-design.md)
+SKIP_SMOKE="${AGENT_HUB_SKIP_SMOKE:-}"           # AGENT_HUB_SKIP_SMOKE=<non-empty> で Step 7 接続確認を skip (binary semantic)
 
 # ============================================================
 # UI helpers
@@ -116,6 +118,11 @@ EXAMPLES:
 
 Tier 1 → Tier 2 への移行は fresh start で実行 (= 自動 migration tool なし、
 Tier 1 throwaway 設計)。 Tier 1 で蓄積した customization は手動で fork に copy 必要。
+
+ENV (advanced):
+  AGENT_HUB_SMOKE_TIMEOUT=<sec>  Step 7 接続スモークテストの poll timeout (default: 10)
+  AGENT_HUB_SKIP_SMOKE=<any>     Step 7 接続スモークテストを skip
+  AGENT_HUB_NO_SERVICE=<any>     launchd/systemd unit 配備を skip (= --no-service と同等)
 
 Refs: https://github.com/kishibashi3/agent-hub/issues/101
 EOF
@@ -1193,6 +1200,58 @@ start_bridge() {
 }
 
 # ============================================================
+# Step 7: connection smoke test (issue #51 install-flow-design.md)
+# ============================================================
+# spawn 後に bridge.log を poll して registered / connected / online を検出する。
+# 接続確認は WARN レベル (= fatal ではない、 install は成功扱いで続行)。
+# dry-run では副作用なしで実行内容のみ print。
+# AGENT_HUB_SKIP_SMOKE / AGENT_HUB_SMOKE_TIMEOUT で挙動を制御できる。
+
+smoke_test_bridge() {
+  local _log="${AGENT_HUB_DIR}/logs/bridge.log"
+  # design doc 準拠の接続シグナル (Step 7): registered / connected / online のいずれか
+  local _pattern='registered|connected|online'
+
+  if [[ "${DRY_RUN}" == "yes" ]]; then
+    c_dim "[dry-run] would poll ${_log} for '${_pattern}' (up to ${SMOKE_TIMEOUT}s)"
+    return 0
+  fi
+
+  if [[ -n "${SKIP_SMOKE}" ]]; then
+    info "Step 7 smoke test skipped (AGENT_HUB_SKIP_SMOKE set)."
+    return 0
+  fi
+
+  info "Step 7 smoke test: waiting for bridge to connect (up to ${SMOKE_TIMEOUT}s)..."
+
+  # 1 秒間隔で poll、 接続シグナルを検出したら早期 break (= 固定 sleep より応答的)。
+  local _elapsed=0
+  local _hit="no"
+  while [[ "${_elapsed}" -lt "${SMOKE_TIMEOUT}" ]]; do
+    if [[ -f "${_log}" ]] && grep -Eq "${_pattern}" "${_log}" 2>/dev/null; then
+      _hit="yes"
+      break
+    fi
+    sleep 1
+    (( _elapsed++ )) || true
+  done
+
+  if [[ "${_hit}" == "yes" ]]; then
+    ok "Step 7 smoke test — bridge connected to agent-hub ✅"
+    local _line
+    _line=$(grep -E "${_pattern}" "${_log}" 2>/dev/null | tail -1 || true)
+    [[ -n "${_line}" ]] && c_dim "    ${_line}"
+  else
+    # 非 fatal: 接続できなくても install 自体は成功 (PAT 未設定 / hub 起動待ち等が原因のことが多い)。
+    warn "Step 7 smoke test — could not confirm bridge connection within ${SMOKE_TIMEOUT}s (non-fatal)."
+    warn "  → check the log: tail -f ${_log}"
+    if [[ -z "${AGENT_HUB_GITHUB_PAT:-}" ]]; then
+      warn "  → AGENT_HUB_GITHUB_PAT is not set — bridge cannot authenticate. Set it and respawn."
+    fi
+  fi
+}
+
+# ============================================================
 # doctor subcommand (issue #37) — health-check
 # ============================================================
 
@@ -1557,6 +1616,7 @@ main() {
   install_autostart_unit
 
   start_bridge
+  smoke_test_bridge       # Step 7: spawn 後に bridge 接続を確認 (issue #51, non-fatal)
   print_summary
 
   # CE + self-host: admin setup ガイダンスを print (= deployment init gate の次のステップを案内)
