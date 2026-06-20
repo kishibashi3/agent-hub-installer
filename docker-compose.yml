@@ -31,12 +31,15 @@ services:
       # Edition: community (PAT 認証 + multi-tenant) / private (trust, LAN 専用)
       # 未設定時は server の fail-fast が検出する (.env.example の AGENT_HUB_EDITION を必ず設定すること)
       AGENT_HUB_EDITION: ${AGENT_HUB_EDITION:-}
-      # GitHub PAT (scope: read:user) — community edition 必須
-      GITHUB_PAT: ${GITHUB_PAT:-}
+      # GitHub PAT (scope: read:user) — community edition で client 接続時に検証される
+      # :- フォールバックを付けない: 未設定なら docker compose が config-time に警告を出す
+      # (server 自身はこの env を読まず、PAT 検証は client 提示ヘッダに対して行う。
+      #  community edition 必須の loud fail は AGENT_HUB_EDITION 未設定時の EditionConfigError 側)
+      AGENT_HUB_GITHUB_PAT: ${AGENT_HUB_GITHUB_PAT}
       # tenant (省略可、デフォルト tenant を使う場合は不要)
       AGENT_HUB_TENANT: ${AGENT_HUB_TENANT:-}
       # DB path (コンテナ内パス、volume mount と合わせること)
-      DB_PATH: ${DB_PATH:-/app/data/app.db}
+      AGENT_HUB_DB_PATH: ${AGENT_HUB_DB_PATH:-/app/data/app.db}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
       interval: 30s
@@ -56,7 +59,7 @@ services:
       # agent-hub と同じ data dir を read-only で共有
       - ./data:/app/data:ro
     environment:
-      DB_PATH: /app/data/app.db
+      AGENT_HUB_DB_PATH: /app/data/app.db
       PORT: "8080"
       AGENT_HUB_TENANT: ${AGENT_HUB_TENANT:-}
     depends_on:
