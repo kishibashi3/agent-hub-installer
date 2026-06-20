@@ -73,7 +73,7 @@ USAGE:
   curl -fsSL https://kishibashi3.github.io/agent-hub-installer/install.sh | bash -s -- [OPTIONS]
 
 SUBCOMMANDS:
-  doctor                     health-check: PAT / hub / port / sed / grep / bash / env / plugin / zombie
+  doctor                     health-check: PAT / hub / port / sed / grep / bash / env / plugin / zombie / dir
   generate-env               env.sh が未生成の環境向け: ~/.agent-hub/env.sh を生成する
                              ~/.bashrc (bash) または ~/.zshrc (zsh) に source 行を自動追記する
                              (既存インストール環境 / 手動セットアップ環境で使用)
@@ -1364,6 +1364,61 @@ doctor_cmd() {
   else
     ok "bridge zombie detection — hub is reachable, no zombie check needed"
     (( _pass++ )) || true
+  fi
+
+  # ── Check 10: agent-hub directory layout & permissions ────────
+  # ~/.agent-hub/ の health を確認する (issue #51 agent-hub-dir-layout.md)。
+  # state/ (= agent-hub-control#10 でパス変更予定) には依存しない範囲のみチェック。
+  local _ahd="${AGENT_HUB_DIR:-${HOME}/.agent-hub}"
+  # portable な perm / owner 取得 (GNU stat -c → BSD stat -f fallback)
+  _stat_perm() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null || echo ""; }
+  _stat_uid()  { stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1" 2>/dev/null || echo ""; }
+
+  if [[ ! -d "${_ahd}" ]]; then
+    warn "[warn]  agent-hub dir — ${_ahd} not found (installer 未実行?)"
+    (( _warn++ )) || true
+  elif [[ ! -w "${_ahd}" ]]; then
+    err "[fail]  agent-hub dir — ${_ahd} is not writable (root 所有など? bridge がログ書き込み不可)"
+    (( _fail++ )) || true
+  else
+    # ownership: 現在の uid と一致しない (= root 所有等) なら warn
+    local _dir_uid _cur_uid
+    _dir_uid=$(_stat_uid "${_ahd}")
+    _cur_uid=$(id -u 2>/dev/null || echo "")
+    if [[ -n "${_dir_uid}" && -n "${_cur_uid}" && "${_dir_uid}" != "${_cur_uid}" ]]; then
+      warn "[warn]  agent-hub dir — ${_ahd} owned by uid ${_dir_uid}, not current user (uid ${_cur_uid})"
+      (( _warn++ )) || true
+    else
+      ok "agent-hub dir — ${_ahd} exists and is writable"
+      (( _pass++ )) || true
+    fi
+
+    # logs/ サブディレクトリ (bridge.log の書き込み先)
+    if [[ ! -d "${_ahd}/logs" ]]; then
+      warn "[warn]  logs dir — ${_ahd}/logs not found (bridge log 出力先 — installer 再実行で作成)"
+      (( _warn++ )) || true
+    elif [[ ! -w "${_ahd}/logs" ]]; then
+      err "[fail]  logs dir — ${_ahd}/logs is not writable (bridge がログを書けない)"
+      (( _fail++ )) || true
+    else
+      ok "logs dir — ${_ahd}/logs exists and is writable"
+      (( _pass++ )) || true
+    fi
+
+    # .env secret hygiene: group/other に読み取り権限があれば warn (期待値 600)
+    if [[ -f "${_ahd}/.env" ]]; then
+      local _env_perm
+      _env_perm=$(_stat_perm "${_ahd}/.env")
+      if [[ -z "${_env_perm}" ]]; then
+        info "  .env perms — could not stat ${_ahd}/.env (stat 非対応?)、skip"
+      elif [[ "${_env_perm: -2}" != "00" ]]; then
+        warn "[warn]  .env perms — ${_ahd}/.env is ${_env_perm} (secret が group/other に露出。chmod 600 推奨)"
+        (( _warn++ )) || true
+      else
+        ok ".env perms — ${_ahd}/.env is ${_env_perm} (owner-only ✅)"
+        (( _pass++ )) || true
+      fi
+    fi
   fi
 
   # ── Summary ───────────────────────────────────────────────────
