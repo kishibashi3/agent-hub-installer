@@ -38,6 +38,17 @@ DRY_RUN="no"
 SKIP_DOCKER_PULL="no"
 SUBCOMMAND=""
 NO_SERVICE="${AGENT_HUB_NO_SERVICE:-}"     # --no-service / AGENT_HUB_NO_SERVICE=<non-empty> で launchd/systemd 配備を skip (NO_COLOR 型 binary semantic)
+SMOKE_TIMEOUT="${AGENT_HUB_SMOKE_TIMEOUT:-10}"   # Step 7 接続スモークテストの poll timeout 秒数 (issue #51 install-flow-design.md)
+SKIP_SMOKE="${AGENT_HUB_SKIP_SMOKE:-}"           # AGENT_HUB_SKIP_SMOKE=<non-empty> で Step 7 接続確認を skip (binary semantic)
+BRIDGE_PID=""        # start_bridge() が spawn した bridge プロセスの PID (smoke の fail-fast 用)
+# Step 7 smoke の判定結果。 print_summary() がバナー文言を、 main() が exit code を分岐する。
+#   connected      : 接続シグナル検出 = 正常
+#   skipped/dryrun : smoke を実行していない = 正常扱い
+#   already-running: 既存 bridge プロセス生存 (respawn せず) = idempotent 再実行 = 正常扱い (exit0)
+#   pending-pat    : 未接続だが PAT 未設定 = opening ceremony で後設定する想定どおりの pending (exit0)
+#   unconfirmed    : PAT 設定済みなのに未接続 / spawn 即死 = 真の異常 (success 文言を出さず非0 exit)
+SMOKE_STATUS="skipped"
+EXIT_SMOKE_UNCONFIRMED=2   # 接続未確認＝未完了 を呼出側 (CI 等) に返す専用 exit code
 
 # ============================================================
 # UI helpers
@@ -116,6 +127,11 @@ EXAMPLES:
 
 Tier 1 → Tier 2 への移行は fresh start で実行 (= 自動 migration tool なし、
 Tier 1 throwaway 設計)。 Tier 1 で蓄積した customization は手動で fork に copy 必要。
+
+ENV (advanced):
+  AGENT_HUB_SMOKE_TIMEOUT=<sec>  Step 7 接続スモークテストの poll timeout (default: 10)
+  AGENT_HUB_SKIP_SMOKE=<any>     Step 7 接続スモークテストを skip
+  AGENT_HUB_NO_SERVICE=<any>     launchd/systemd unit 配備を skip (= --no-service と同等)
 
 Refs: https://github.com/kishibashi3/agent-hub/issues/101
 EOF
@@ -325,6 +341,10 @@ check_prereqs() {
   # uv が Python 管理を担うため python3 直接 check は廃止。
   # uv がなければ installer を進められないため early reject。
   check_command uv "Install uv from https://docs.astral.sh/uv/getting-started/installation/"
+  # git は常に必須: install_python_packages() が
+  # `uv tool install ... agent-hub-bridges @ git+https://...` で git 越しに bridge を引くため
+  # (git 不在だと uv tool install が失敗する)。 Tier 不問で early reject。
+  check_command git "Install git (e.g. apt install git / brew install git) — uv tool install pulls agent-hub-bridges via git+https"
 
   # Docker は **`--hub-mode self-host` の時のみ必須** (= PR #2 review Suggestion 1 反映、
   # Minor 3 の natural 延長)。 public mode (= agent-hub-ki.fly.dev に接続) では
@@ -1147,22 +1167,28 @@ PYTHON_EOF
 start_bridge() {
   info "Starting bridge worker in background (logs: ${AGENT_HUB_DIR}/logs/bridge.log)..."
   if [[ "${DRY_RUN}" == "yes" ]]; then
-    c_dim "[dry-run] would spawn: AGENT_HUB_URL=<url> agent-hub-bridge-claude --user ${USER_HANDLE}"
+    c_dim "[dry-run] would spawn: AGENT_HUB_URL=<url> agent-hub-bridge-claude --participant ${USER_HANDLE}"
     return
   fi
 
   # Minor 2 反映: 既に bridge が動いていれば respawn しない (= idempotency 100% 担保)。
-  # pgrep で `agent-hub-bridge-claude --user <handle>` を grep、
+  # pgrep で `agent-hub-bridge-claude --participant <handle>` を grep、
   # 同 handle の bridge が見つかれば skip + hint。
-  if pgrep -f "agent-hub-bridge-claude.*--user.*${USER_HANDLE}" >/dev/null 2>&1; then
+  if pgrep -f "agent-hub-bridge-claude.*--participant.*${USER_HANDLE}" >/dev/null 2>&1; then
     local existing_pid
-    existing_pid=$(pgrep -f "agent-hub-bridge-claude.*--user.*${USER_HANDLE}" | head -1)
+    existing_pid=$(pgrep -f "agent-hub-bridge-claude.*--participant.*${USER_HANDLE}" | head -1)
     warn "Bridge worker already running (PID: ${existing_pid}). Skipping spawn."
     warn "  → to respawn: kill ${existing_pid} && rerun installer"
+    # Critical #1 (PR #55 review): respawn しない経路では bridge.log を truncate しないため、
+    # smoke が「前回 run の古いログ」を判定根拠にし liveness 検知も無効化される (BRIDGE_PID 空)。
+    # 生存している既存プロセスの存在自体が idempotency の保証なので、明示状態を立てて
+    # smoke_test_bridge() 冒頭で early-return させ、古いログ判定経路に入らないようにする。
+    SMOKE_STATUS="already-running"
     return
   fi
 
-  # bridge CLI は --user <handle> + env vars 方式 (--config フラグは未実装)。
+  # bridge CLI は --participant <handle> + env vars 方式 (--config フラグは未実装)。
+  # bridges #224 BREAKING で --user は廃止され --participant (required) に移行済み。
   # AGENT_HUB_URL は resolve_hub_url() で既に export 済み。
   # .env が存在する場合は source して bridge に伝播させる (.env 内の値が優先)。
   # AGENT_HUB_GITHUB_PAT は caller env から継承 (秘密情報をファイルに書かない)。
@@ -1185,11 +1211,103 @@ start_bridge() {
   # nohup + & で daemonize + disown で shell 親子関係を切断 (= Suggestion (a) 反映、
   # SIGHUP propagation を防ぐ)。 stdout/stderr を log file に redirect。
   nohup agent-hub-bridge-claude \
-    --user "${USER_HANDLE}" \
+    --participant "${USER_HANDLE}" \
     > "${AGENT_HUB_DIR}/logs/bridge.log" 2>&1 &
   local spawn_pid=$!
   disown "${spawn_pid}" 2>/dev/null || true   # Suggestion (a): job control 切断
+  # smoke_test_bridge() が spawn 直後の即死を fail-fast 検知できるよう PID を共有する。
+  BRIDGE_PID="${spawn_pid}"
   ok "Bridge worker spawned (PID: ${spawn_pid}) ✅"
+}
+
+# ============================================================
+# Step 7: connection smoke test (issue #51 install-flow-design.md)
+# ============================================================
+# spawn 後に bridge.log を poll して registered / connected / online を検出する。
+# 接続確認は WARN レベル (= fatal ではない、 install は成功扱いで続行)。
+# dry-run では副作用なしで実行内容のみ print。
+# AGENT_HUB_SKIP_SMOKE / AGENT_HUB_SMOKE_TIMEOUT で挙動を制御できる。
+
+smoke_test_bridge() {
+  local _log="${AGENT_HUB_DIR}/logs/bridge.log"
+  # design doc 準拠の接続シグナル (Step 7): registered / connected / online のいずれか
+  local _pattern='registered|connected|online'
+
+  if [[ "${DRY_RUN}" == "yes" ]]; then
+    c_dim "[dry-run] would poll ${_log} for '${_pattern}' (up to ${SMOKE_TIMEOUT}s)"
+    SMOKE_STATUS="dryrun"
+    return 0
+  fi
+
+  if [[ -n "${SKIP_SMOKE}" ]]; then
+    info "Step 7 smoke test skipped (AGENT_HUB_SKIP_SMOKE set)."
+    SMOKE_STATUS="skipped"
+    return 0
+  fi
+
+  # Critical #1 (PR #55 review): start_bridge() が既存 bridge 生存を検知して respawn を skip した経路。
+  # この経路では bridge.log を truncate せず BRIDGE_PID も空のため、poll に入ると「前回 run の古いログ」を
+  # 判定根拠にし (偽陽性/偽陰性)、liveness 検知も無効化される。生存している既存プロセスの存在自体が
+  # idempotency の保証なので、古いログ判定経路に入る前に early-return する (SMOKE_STATUS は維持 = exit0)。
+  if [[ "${SMOKE_STATUS}" == "already-running" ]]; then
+    info "Step 7 smoke test skipped — bridge already running (idempotent rerun)."
+    return 0
+  fi
+
+  info "Step 7 smoke test: waiting for bridge to connect (up to ${SMOKE_TIMEOUT}s)..."
+
+  # 1 秒間隔で poll、 接続シグナルを検出したら早期 break (= 固定 sleep より応答的)。
+  # 加えて spawn した bridge プロセスが死んだら timeout を待たず即 fail-fast
+  # (= spawn 即死 = 旧 --user フラグ等の致命的設定ミスを早期に顕在化させる)。
+  local _elapsed=0
+  local _hit="no"
+  local _died="no"
+  while [[ "${_elapsed}" -lt "${SMOKE_TIMEOUT}" ]]; do
+    if [[ -f "${_log}" ]] && grep -Eq "${_pattern}" "${_log}" 2>/dev/null; then
+      _hit="yes"
+      break
+    fi
+    if [[ -n "${BRIDGE_PID}" ]] && ! kill -0 "${BRIDGE_PID}" 2>/dev/null; then
+      _died="yes"
+      break
+    fi
+    sleep 1
+    (( _elapsed++ )) || true
+  done
+
+  if [[ "${_hit}" == "yes" ]]; then
+    SMOKE_STATUS="connected"
+    ok "Step 7 smoke test — bridge connected to agent-hub ✅"
+    local _line
+    _line=$(grep -E "${_pattern}" "${_log}" 2>/dev/null | tail -1 || true)
+    [[ -n "${_line}" ]] && c_dim "    ${_line}"
+    return 0
+  fi
+
+  # --- 未接続 ---------------------------------------------------------------
+  # サイレント縮退の是正 (issue #57): 「接続できていないのに bootstrapped ✅」を出さない。
+  # PAT 未設定で未接続なのは opening ceremony [1/4] で後設定する想定どおりの pending 状態
+  # (= Tier1 first-run を誤って失敗扱いしない)。 PAT 設定済みで未接続なら真の異常。
+  if [[ "${_died}" == "yes" ]]; then
+    err "Step 7 smoke test — bridge process exited before connecting (spawn failed)."
+    err "  → last log lines:"
+    tail -5 "${_log}" 2>/dev/null | while IFS= read -r _l; do c_dim "      ${_l}"; done
+  else
+    warn "Step 7 smoke test — could not confirm bridge connection within ${SMOKE_TIMEOUT}s."
+    warn "  → check the log: tail -f ${_log}"
+  fi
+
+  if [[ -z "${AGENT_HUB_GITHUB_PAT:-}" ]]; then
+    # PAT 未設定 = 想定どおりの pending。 install 成果物は揃っているので exit0。
+    SMOKE_STATUS="pending-pat"
+    warn "  → AGENT_HUB_GITHUB_PAT is not set yet — bridge cannot authenticate."
+    warn "    set it (opening ceremony [1/4]) then respawn; this is expected on first run."
+  else
+    # PAT 設定済みなのに未接続 = 真の異常 = 未完了。
+    SMOKE_STATUS="unconfirmed"
+    err "  → AGENT_HUB_GITHUB_PAT is set but the bridge did not connect — install is INCOMPLETE."
+  fi
+  return 0
 }
 
 # ============================================================
@@ -1391,9 +1509,21 @@ doctor_cmd() {
 print_summary() {
   local hub_url="${AGENT_HUB_URL}"
   echo
-  c_green "════════════════════════════════════════════════════════"
-  c_green "  agent-hub bootstrapped (Tier ${TIER}) ✅  — 4 steps to first chat"
-  c_green "════════════════════════════════════════════════════════"
+  # サイレント縮退の是正 (issue #57): bridge 接続が未確認のときは「✅ bootstrapped」を出さない。
+  if [[ "${SMOKE_STATUS}" == "unconfirmed" ]]; then
+    c_yellow "════════════════════════════════════════════════════════"
+    c_yellow "  ⚠ agent-hub files installed (Tier ${TIER}) — but bridge connection UNCONFIRMED"
+    c_yellow "  接続未確認＝未完了: AGENT_HUB_GITHUB_PAT is set yet @${USER_HANDLE} did not come online."
+    c_yellow "  → tail -f ${AGENT_HUB_DIR}/logs/bridge.log  then fix and respawn (see トラブルシュート below)."
+    c_yellow "════════════════════════════════════════════════════════"
+  else
+    c_green "════════════════════════════════════════════════════════"
+    c_green "  agent-hub bootstrapped (Tier ${TIER}) ✅  — 4 steps to first chat"
+    c_green "════════════════════════════════════════════════════════"
+    if [[ "${SMOKE_STATUS}" == "pending-pat" ]]; then
+      c_yellow "  (bridge not online yet — set AGENT_HUB_GITHUB_PAT below [1/4], then it connects)"
+    fi
+  fi
   echo
   echo "  Handle: @${USER_HANDLE}    Hub: ${hub_url}"
   echo
@@ -1454,9 +1584,9 @@ print_summary() {
   echo "  Bridge log : tail -f ~/.agent-hub/logs/bridge.log"
   echo "  Bridge PID : pgrep -f agent-hub-bridge-claude"
   echo "  Restart    : export AGENT_HUB_GITHUB_PAT=\$(gh auth token)  # gh なし? → 手動で export"
-  echo "               pkill -f \"agent-hub-bridge-claude.*--user.*${USER_HANDLE}\" || true"
+  echo "               pkill -f \"agent-hub-bridge-claude.*--participant.*${USER_HANDLE}\" || true"
   echo "               source ${AGENT_HUB_DIR}/env.sh"
-  echo "               nohup agent-hub-bridge-claude --user ${USER_HANDLE} \\"
+  echo "               nohup agent-hub-bridge-claude --participant ${USER_HANDLE} \\"
   echo "                 >> ~/.agent-hub/logs/bridge.log 2>&1 &"
   c_dim "  Full guide : https://github.com/kishibashi3/agent-hub-installer/blob/main/README.md"
   echo
@@ -1557,11 +1687,19 @@ main() {
   install_autostart_unit
 
   start_bridge
+  smoke_test_bridge       # Step 7: spawn 後に bridge 接続を確認 (issue #51, non-fatal)
   print_summary
 
   # CE + self-host: admin setup ガイダンスを print (= deployment init gate の次のステップを案内)
   if [[ "${HUB_MODE}" == "self-host" ]] && [[ "${EDITION}" == "community" ]]; then
     print_ce_admin_setup_guide
+  fi
+
+  # サイレント縮退の是正 (issue #57): PAT 設定済みなのに bridge が接続できなかった場合は
+  # 「接続未確認＝未完了」を非0 exit で呼出側 (CI / 自動化) に返す。
+  # pending-pat (PAT 未設定の想定どおり pending) や connected/skipped は exit0。
+  if [[ "${SMOKE_STATUS}" == "unconfirmed" ]]; then
+    exit "${EXIT_SMOKE_UNCONFIRMED}"
   fi
 }
 
