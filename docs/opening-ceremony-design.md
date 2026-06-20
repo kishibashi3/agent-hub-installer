@@ -26,7 +26,7 @@
 ```
 Next:
   source ~/.agent-hub/env.sh
-  export GITHUB_PAT=$(gh auth token)
+  export AGENT_HUB_GITHUB_PAT=$(gh auth token)
   claude
 
 Then in Claude Code: '@${USER_HANDLE} hello'
@@ -39,7 +39,7 @@ Then in Claude Code: '@${USER_HANDLE} hello'
 | P1 | **MCP plugin インストール手順が欠落** | Claude Code が `@handle` を agent-hub に routing しない → 返信ゼロ、原因不明 |
 | P2 | **ステップ番号がなく順序が不明確** | どこで詰まったかが分からない |
 | P3 | **bridge 接続確認方法がない** | bridge が起動していても認証エラーで繋がっていないケースを検出できない |
-| P4 | **GITHUB_PAT なしで bridge が起動した場合のリカバリ手順がない** | installer が PAT チェックを warn で skip して起動するため、bridge が認証エラーのまま動く可能性がある |
+| P4 | **AGENT_HUB_GITHUB_PAT なしで bridge が起動した場合のリカバリ手順がない** | installer が PAT チェックを warn で skip して起動するため、bridge が認証エラーのまま動く可能性がある |
 | P5 | **返信がない場合のデバッグ方法がない** | サイレントフェイルアウトでユーザーが詰む |
 
 ---
@@ -52,7 +52,7 @@ Then in Claude Code: '@${USER_HANDLE} hello'
 
 | ステップ | 場所 | アクション | 確認方法 |
 |---|---|---|---|
-| **Step 1** | ターミナル | `export GITHUB_PAT=$(gh auth token)` | エラーなし |
+| **Step 1** | ターミナル | `export AGENT_HUB_GITHUB_PAT=$(gh auth token)` | エラーなし |
 | **Step 2** | ターミナル | `source ~/.agent-hub/env.sh` | `echo $AGENT_HUB_URL` に値が入る |
 | **Step 3** | ターミナル | `tail -20 ~/.agent-hub/logs/bridge.log` | `registered` / `connected` の文字列を確認 |
 | **Step 4** | ターミナル | `claude` | Claude Code が起動する |
@@ -74,11 +74,11 @@ Then in Claude Code: '@${USER_HANDLE} hello'
 
 ## 4. つまづきポイントと対処
 
-### P1 (最重要): GITHUB_PAT なしで bridge が起動してしまった
+### P1 (最重要): AGENT_HUB_GITHUB_PAT なしで bridge が起動してしまった
 
 **症状**: `@handle hello` を送っても返信なし。bridge.log に `authentication failed` 等のエラー。
 
-**原因**: installer 実行時に `GITHUB_PAT` が未 export だった場合、bridge は起動するが認証に失敗する。
+**原因**: installer 実行時に `AGENT_HUB_GITHUB_PAT` が未 export だった場合、bridge は起動するが認証に失敗する。
 
 **対処**:
 ```bash
@@ -86,7 +86,7 @@ Then in Claude Code: '@${USER_HANDLE} hello'
 pkill -f agent-hub-bridge-claude
 
 # PAT を設定して再起動
-export GITHUB_PAT=$(gh auth token)   # gh なし? → GitHub Settings → tokens (scope: read:user)
+export AGENT_HUB_GITHUB_PAT=$(gh auth token)   # gh なし? → GitHub Settings → tokens (scope: read:user)
 source ~/.agent-hub/env.sh
 nohup agent-hub-bridge-claude --user <handle> \
   >> ~/.agent-hub/logs/bridge.log 2>&1 &
@@ -96,7 +96,7 @@ nohup agent-hub-bridge-claude --user <handle> \
 
 **症状**: `gh auth token: unknown subcommand`
 
-**対処**: GitHub → Settings → Developer settings → Personal access tokens → 新規発行 (scope: `read:user`)。`export GITHUB_PAT='ghp_xxx...'` で手動設定。
+**対処**: GitHub → Settings → Developer settings → Personal access tokens → 新規発行 (scope: `read:user`)。`export AGENT_HUB_GITHUB_PAT='ghp_xxx...'` で手動設定。
 
 ### P3: MCP plugin が Claude Code に入っていない
 
@@ -130,8 +130,8 @@ nohup agent-hub-bridge-claude --user <handle> \
 
   ─── Opening ceremony ────────────────────────────────
 
-  [1/4] GITHUB_PAT を設定 (bridge 認証に必要):
-    export GITHUB_PAT=$(gh auth token)
+  [1/4] AGENT_HUB_GITHUB_PAT を設定 (bridge 認証に必要):
+    export AGENT_HUB_GITHUB_PAT=$(gh auth token)
     # gh なし? → https://github.com/settings/tokens (scope: read:user)
 
   [2/4] env を load して bridge を確認:
@@ -167,7 +167,7 @@ nohup agent-hub-bridge-claude --user <handle> \
 `--interactive` フラグで installer 完了時に以下のフローを実行:
 
 ```
-installer: GITHUB_PAT を入力してください (gh auth token の出力 or 手動):
+installer: AGENT_HUB_GITHUB_PAT を入力してください (gh auth token の出力 or 手動):
 > ghp_xxx...
 installer: [ok] bridge を再起動します...
 installer: [ok] registered を確認しました ✅
@@ -192,7 +192,7 @@ SETUP.md の「Step 4: 動作確認」を以下に更新:
 tail -20 ~/.agent-hub/logs/bridge.log
 \`\`\`
 
-`registered` または `connected` が見えれば OK。見えない場合は GITHUB_PAT を確認してから bridge を再起動してください。
+`registered` または `connected` が見えれば OK。見えない場合は AGENT_HUB_GITHUB_PAT を確認してから bridge を再起動してください。
 
 ### Step 5: Claude Code を起動して plugin を確認
 

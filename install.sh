@@ -884,7 +884,9 @@ services:
       - ./data:/app/data
     environment:
       AGENT_HUB_EDITION: ${AGENT_HUB_EDITION:-}
-      AGENT_HUB_GITHUB_PAT: ${AGENT_HUB_GITHUB_PAT:-}
+      # PAT は :- フォールバックを付けない: 未設定なら空が server に渡り
+      # community edition の fail-fast が loud に検出する (issue #59 Minor #6)。
+      AGENT_HUB_GITHUB_PAT: ${AGENT_HUB_GITHUB_PAT}
       AGENT_HUB_TENANT: ${AGENT_HUB_TENANT:-}
       AGENT_HUB_DB_PATH: ${AGENT_HUB_DB_PATH:-/app/data/app.db}
     healthcheck:
