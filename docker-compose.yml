@@ -31,9 +31,10 @@ services:
       # Edition: community (PAT 認証 + multi-tenant) / private (trust, LAN 専用)
       # 未設定時は server の fail-fast が検出する (.env.example の AGENT_HUB_EDITION を必ず設定すること)
       AGENT_HUB_EDITION: ${AGENT_HUB_EDITION:-}
-      # GitHub PAT (scope: read:user) — community edition 必須
-      # :- フォールバックを付けない: 未設定なら空が server に渡り community edition の
-      # fail-fast が loud に検出する (.env.example の AGENT_HUB_GITHUB_PAT を設定すること)
+      # GitHub PAT (scope: read:user) — community edition で client 接続時に検証される
+      # :- フォールバックを付けない: 未設定なら docker compose が config-time に警告を出す
+      # (server 自身はこの env を読まず、PAT 検証は client 提示ヘッダに対して行う。
+      #  community edition 必須の loud fail は AGENT_HUB_EDITION 未設定時の EditionConfigError 側)
       AGENT_HUB_GITHUB_PAT: ${AGENT_HUB_GITHUB_PAT}
       # tenant (省略可、デフォルト tenant を使う場合は不要)
       AGENT_HUB_TENANT: ${AGENT_HUB_TENANT:-}
