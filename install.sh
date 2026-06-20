@@ -44,6 +44,7 @@ BRIDGE_PID=""        # start_bridge() が spawn した bridge プロセスの PI
 # Step 7 smoke の判定結果。 print_summary() がバナー文言を、 main() が exit code を分岐する。
 #   connected      : 接続シグナル検出 = 正常
 #   skipped/dryrun : smoke を実行していない = 正常扱い
+#   already-running: 既存 bridge プロセス生存 (respawn せず) = idempotent 再実行 = 正常扱い (exit0)
 #   pending-pat    : 未接続だが PAT 未設定 = opening ceremony で後設定する想定どおりの pending (exit0)
 #   unconfirmed    : PAT 設定済みなのに未接続 / spawn 即死 = 真の異常 (success 文言を出さず非0 exit)
 SMOKE_STATUS="skipped"
@@ -1178,6 +1179,11 @@ start_bridge() {
     existing_pid=$(pgrep -f "agent-hub-bridge-claude.*--participant.*${USER_HANDLE}" | head -1)
     warn "Bridge worker already running (PID: ${existing_pid}). Skipping spawn."
     warn "  → to respawn: kill ${existing_pid} && rerun installer"
+    # Critical #1 (PR #55 review): respawn しない経路では bridge.log を truncate しないため、
+    # smoke が「前回 run の古いログ」を判定根拠にし liveness 検知も無効化される (BRIDGE_PID 空)。
+    # 生存している既存プロセスの存在自体が idempotency の保証なので、明示状態を立てて
+    # smoke_test_bridge() 冒頭で early-return させ、古いログ判定経路に入らないようにする。
+    SMOKE_STATUS="already-running"
     return
   fi
 
@@ -1236,6 +1242,15 @@ smoke_test_bridge() {
   if [[ -n "${SKIP_SMOKE}" ]]; then
     info "Step 7 smoke test skipped (AGENT_HUB_SKIP_SMOKE set)."
     SMOKE_STATUS="skipped"
+    return 0
+  fi
+
+  # Critical #1 (PR #55 review): start_bridge() が既存 bridge 生存を検知して respawn を skip した経路。
+  # この経路では bridge.log を truncate せず BRIDGE_PID も空のため、poll に入ると「前回 run の古いログ」を
+  # 判定根拠にし (偽陽性/偽陰性)、liveness 検知も無効化される。生存している既存プロセスの存在自体が
+  # idempotency の保証なので、古いログ判定経路に入る前に early-return する (SMOKE_STATUS は維持 = exit0)。
+  if [[ "${SMOKE_STATUS}" == "already-running" ]]; then
+    info "Step 7 smoke test skipped — bridge already running (idempotent rerun)."
     return 0
   fi
 
