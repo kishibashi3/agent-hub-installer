@@ -43,7 +43,7 @@ Hosted モードでは Docker チェックをスキップ。
 ### 2. Hub URL 設定 (Step 2)
 
 ```
-if [ "$HUB_MODE" = "hosted" ]; then
+if [ "$HUB_MODE" = "public" ]; then
     AGENT_HUB_URL="https://agent-hub-ki.fly.dev/mcp"
 else
     # ユーザーから URL を対話入力
@@ -103,9 +103,12 @@ services:
       - "3000:3000"
     environment:
       AGENT_HUB_AUTH_MODE: pat
-      AGENT_HUB_DB_PATH: /data/app.db
+      # 未設定なら docker compose が loud failure する (fail-fast: フォールバックを付けない)。
+      # 値は ~/.agent-hub/.env 経由で渡す (例: `docker compose --env-file ~/.agent-hub/.env up -d`)。
+      AGENT_HUB_GITHUB_PAT: ${AGENT_HUB_GITHUB_PAT}
+      AGENT_HUB_DB_PATH: /app/data/app.db
     volumes:
-      - ./data:/data
+      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]

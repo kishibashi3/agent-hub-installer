@@ -28,7 +28,7 @@
                            │ OK
                     ┌──────▼──────┐
                     │ Step 1      │
-                    │ GITHUB_PAT  │
+                    │ PAT         │
                     │ 入力        │
                     └──────┬──────┘
                            │
@@ -105,7 +105,7 @@
 
 ---
 
-## Step 1: GITHUB_PAT 入力
+## Step 1: AGENT_HUB_GITHUB_PAT 入力
 
 ### 優先順位
 
@@ -242,7 +242,10 @@ uv tool install agent-hub-bridges[claude]
 ### bridge spawn
 
 ```bash
-source ~/.agent-hub/.env
+# .env は bare `VAR=val` 形式 (export なし) のため、set -a で auto-export しないと
+# nohup で起動する bridge サブプロセスに変数が継承されない。
+# env.sh は export 文を含むため set -a 不要。実装 (install.sh) と整合させること。
+set -a; source ~/.agent-hub/.env; set +a
 source ~/.agent-hub/env.sh
 nohup agent-hub-bridge-claude \
   --user "${AGENT_HUB_USER}" \
@@ -293,6 +296,8 @@ else
     echo "  tail -f ~/.agent-hub/logs/bridge.log"
 fi
 ```
+
+> **注**: 上記の緩い grep パターンは `already registered but failed` のようなエラー文言にも誤マッチしうる。実装では成功ログに限定したパターン (例: `'\[INFO\] registered'`) を使うこと。
 
 ---
 
